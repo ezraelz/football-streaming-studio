@@ -1,0 +1,33 @@
+# ============================================================
+# Root-level
+# ============================================================
+
+.DS_Store
+Thumbs.db
+*.log
+*.pid
+*.seed
+*.pid.lock
+
+# ============================================================
+# Environment / secrets
+# ============================================================
+
+# Never commit .env files — they contain API keys, DB passwords,
+# OBS WebSocket passwords, etc.
+.env
+.env.local
+.env.development
+.env.production
+.env.*.local
+
+# But keep the example files so the project is reproducible
+!.env.example
+!backend/.env.example
+
+# ============================================================
+# Next.js / TypeScript / Node
+# ============================================================
+
+football-streaming-studio/
+  # but we're at the root — prefix each rule with the folder

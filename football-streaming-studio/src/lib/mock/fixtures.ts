@@ -1,0 +1,135 @@
+import { Fixture, MatchSnapshot, MatchEvent, CommentaryItem } from "../types/types";
+
+const now = () => new Date().toISOString();
+const minsAgo = (m: number) => new Date(Date.now() - m * 60_000).toISOString();
+
+export const mockFixtures: Fixture[] = [
+  {
+    id: "match-001",
+    competition: "Premier League",
+    home: { id: "ars", name: "Arsenal", shortName: "ARS", color: "#EF0107" },
+    away: { id: "che", name: "Chelsea", shortName: "CHE", color: "#034694" },
+    kickoff: minsAgo(-15),
+    status: "live",
+    coverage: { lineups: true, events: true, stats: true, coordinates: false },
+  },
+  {
+    id: "match-002",
+    competition: "La Liga",
+    home: { id: "rma", name: "Real Madrid", shortName: "RMA", color: "#FFFFFF" },
+    away: { id: "bar", name: "Barcelona", shortName: "BAR", color: "#A50044" },
+    kickoff: minsAgo(-120),
+    status: "ft",
+    coverage: { lineups: true, events: true, stats: true, coordinates: true },
+  },
+  {
+    id: "match-003",
+    competition: "Serie A",
+    home: { id: "int", name: "Inter", shortName: "INT", color: "#0068A8" },
+    away: { id: "mil", name: "AC Milan", shortName: "MIL", color: "#FB090B" },
+    kickoff: minsAgo(-1440),
+    status: "scheduled",
+    coverage: { lineups: false, events: false, stats: false, coordinates: false },
+  },
+];
+
+export const mockSnapshot: MatchSnapshot = {
+  matchId: "match-001",
+  competition: "Premier League",
+  home: mockFixtures[0].home,
+  away: mockFixtures[0].away,
+  score: { home: 2, away: 1 },
+  period: "2H",
+  minute: 67,
+  status: "live",
+  stats: {
+    possession: { home: 58, away: 42 },
+    shots: { home: 11, away: 7 },
+    shotsOnTarget: { home: 5, away: 3 },
+    corners: { home: 6, away: 2 },
+    fouls: { home: 8, away: 12 },
+  },
+  providerUpdatedAt: minsAgo(0),
+  receivedAt: now(),
+  freshness: "fresh",
+};
+
+export const mockEvents: MatchEvent[] = [
+  {
+    eventId: "ev-1",
+    matchId: "match-001",
+    type: "goal",
+    teamId: "ars",
+    playerId: "p-saka",
+    playerName: "Saka",
+    minute: 23,
+    status: "confirmed",
+    sourceUpdatedAt: minsAgo(44),
+    receivedAt: minsAgo(44),
+  },
+  {
+    eventId: "ev-2",
+    matchId: "match-001",
+    type: "card",
+    teamId: "che",
+    playerId: "p-caicedo",
+    playerName: "Caicedo",
+    minute: 41,
+    status: "confirmed",
+    sourceUpdatedAt: minsAgo(26),
+    receivedAt: minsAgo(26),
+  },
+  {
+    eventId: "ev-3",
+    matchId: "match-001",
+    type: "goal",
+    teamId: "che",
+    playerId: "p-palmer",
+    playerName: "Palmer",
+    minute: 52,
+    status: "confirmed",
+    sourceUpdatedAt: minsAgo(15),
+    receivedAt: minsAgo(15),
+  },
+  {
+    eventId: "ev-4",
+    matchId: "match-001",
+    type: "goal",
+    teamId: "ars",
+    playerId: "p-havertz",
+    playerName: "Havertz",
+    minute: 67,
+    status: "confirmed",
+    sourceUpdatedAt: minsAgo(0),
+    receivedAt: minsAgo(0),
+  },
+];
+
+export const mockCommentary = (): CommentaryItem[] => [
+  {
+    id: "cm-1",
+    matchId: "match-001",
+    triggerEventId: "ev-4",
+    mode: "suggestion",
+    status: "pending_approval",
+    text: "Havertz restores Arsenal's lead at the Emirates — that's his eighth of the season.",
+    language: "en",
+    priority: "high",
+    expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    sourceFacts: { minute: 67, score: { home: 2, away: 1 }, player: "Havertz" },
+    createdAt: minsAgo(0),
+  },
+  {
+    id: "cm-2",
+    matchId: "match-001",
+    triggerEventId: null,
+    mode: "suggestion",
+    status: "pending_approval",
+    text: "Arsenal have had 58% of the ball and five shots on target — the pressure is telling.",
+    language: "en",
+    priority: "normal",
+    expiresAt: new Date(Date.now() + 90_000).toISOString(),
+    sourceFacts: { possession: { home: 58, away: 42 }, shotsOnTarget: { home: 5, away: 3 } },
+    createdAt: minsAgo(1),
+  },
+];
