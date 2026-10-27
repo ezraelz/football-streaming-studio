@@ -1,5 +1,6 @@
 import { MatchSnapshot } from "@/lib/types/types";
 import { formatClock } from "@/lib/utility/utils";
+import { TeamCrest } from "@/components/overlay/crest";
 
 export function ScoreboardScene({ snapshot }: { snapshot: MatchSnapshot }) {
   const stale = snapshot.freshness !== "fresh";
@@ -26,11 +27,11 @@ export function ScoreboardScene({ snapshot }: { snapshot: MatchSnapshot }) {
   );
 }
 
-function TeamBar({ team, side }: { team: MatchSnapshot["home"]; side: "home" | "away" }) {
+function TeamBar({ team, side: _side }: { team: MatchSnapshot["home"]; side: "home" | "away" }) {
   return (
-    <div className={`flex items-center gap-3 px-5 py-3 ${side === "home" ? "" : "flex-row-reverse"}`}>
-      <div className="h-10 w-10 rounded-full border-2 border-white/20" style={{ backgroundColor: team.color }} />
-      <span className="text-2xl font-bold uppercase tracking-wide text-white">{team.shortName}</span>
+    <div className="flex flex-col items-center px-4 py-2">
+      <TeamCrest name={team.name} color={team.color} crestUrl={team.crestUrl} size={80} />
+      <div className="mt-2 text-lg font-bold uppercase tracking-wide text-white">{team.name}</div>
     </div>
   );
 }

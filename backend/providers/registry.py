@@ -4,13 +4,13 @@ from .football_data_org import FootballDataOrgProvider
 from .thesportsdb import TheSportsDBProvider
 from .base import FootballProvider
 from .mock import MockProvider
-
+from .bzzoiro import BzzoiroProvider
 
 _REGISTRY: dict[str, type[FootballProvider]] = {
     "mock": MockProvider,
     "thesportsdb": TheSportsDBProvider,
     "football-data-org": FootballDataOrgProvider,
-    # "sportmonks": SportmonksProvider,   # added later
+    "bzzoiro": BzzoiroProvider, 
 }
 
 

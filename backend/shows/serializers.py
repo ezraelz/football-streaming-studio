@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import ShowProfile, ShowSession
+from .models import ShowProfile, ShowSession, EditorialCard
 
 
 class ShowProfileSerializer(serializers.ModelSerializer):
@@ -31,3 +31,16 @@ class ShowSessionSerializer(serializers.ModelSerializer):
 class CreateShowSessionSerializer(serializers.Serializer):
     show_profile_id = serializers.UUIDField()
     match_id = serializers.CharField()  # the provider_match_id string
+    
+
+
+class EditorialCardSerializer(serializers.ModelSerializer):
+    session_id = serializers.UUIDField(source="session.id", read_only=True)
+
+    class Meta:
+        model = EditorialCard
+        fields = [
+            "id", "session_id", "card_type", "title",
+            "payload", "visible", "created_at", "updated_at",
+        ]
+        read_only_fields = ["id", "session_id", "created_at", "updated_at"]

@@ -33,6 +33,8 @@ def _upsert_match(fixture: Fixture, provider_name: str) -> Match:
         provider_match_id=fixture.id,
         defaults={
             "competition": fixture.competition,
+            "provider_league_id": getattr(fixture, "league_id", ""),
+            "provider_league_name": getattr(fixture, "league_name", ""),
             "home_team_id": fixture.home.id,
             "home_team_name": fixture.home.name,
             "home_team_short": fixture.home.short_name,

@@ -25,6 +25,8 @@ class Fixture:
     kickoff: datetime
     status: str  # "scheduled" | "live" | "ft"
     coverage: dict = field(default_factory=dict)
+    league_id: str = ""
+    league_name: str = ""
 
 
 @dataclass
@@ -65,3 +67,22 @@ class Lineup:
     formation: str
     players: list  # list of {"id": str, "name": str, "position": str, "x": float, "y": float}
     source_updated_at: datetime
+    
+@dataclass
+class HeadToHead:
+    date: str                # "2024-11-03"
+    home_team: str
+    away_team: str
+    score: str               # "2-1"
+    competition: str
+
+@dataclass
+class TeamFixture:
+    match_id: str
+    competition: str
+    home_short: str
+    away_short: str
+    home_name: str
+    away_name: str
+    kickoff: datetime
+    venue: str | None = None

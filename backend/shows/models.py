@@ -67,3 +67,34 @@ class ShowSession(models.Model):
 
     def __str__(self) -> str:
         return f"{self.show_profile.name} @ {self.match.provider_match_id} [{self.state}]"
+    
+    
+class EditorialCard(models.Model):
+    """A manually-authored scene payload for pre/post match segments."""
+    CARD_TYPES = [
+        ("fixture_intro", "Fixture intro"),
+        ("lineups", "Lineups"),
+        ("standings", "Standings"),
+        ("form", "Recent form"),
+        ("head_to_head", "Head to head"),
+        ("top_scorers", "Top scorers"),
+        ("match_summary", "Match summary"),
+        ("countdown", "Countdown"),
+        ("custom", "Custom"),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    session = models.ForeignKey(
+        "shows.ShowSession", on_delete=models.CASCADE, related_name="editorial_cards"
+    )
+    card_type = models.CharField(max_length=32, choices=CARD_TYPES)
+    title = models.CharField(max_length=128)
+    payload = models.JSONField(default=dict)  # shape varies by card_type
+    visible = models.BooleanField(default=False)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        

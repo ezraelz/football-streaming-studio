@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Iterable, Optional
 
 from .base import FootballProvider
-from .schemas import Fixture, MatchSnapshot, MatchEvent, Lineup, TeamRef, utcnow
+from .schemas import Fixture, MatchSnapshot, MatchEvent, Lineup, TeamRef, utcnow, HeadToHead, TeamFixture
 
 
 def _mins_ago(m: float) -> datetime:
@@ -211,4 +211,43 @@ class MockProvider(FootballProvider):
                 ],
                 source_updated_at=now,
             ),
+        ]
+        
+    def get_head_to_head(self, team_a: str, team_b: str, limit: int = 10) -> Iterable[HeadToHead]:
+        # Normalize pair so the same fixture shows up regardless of which side is "home"
+        pair = {team_a, team_b}
+        if pair != {"ars", "che"}:
+            return []
+
+        return [
+            HeadToHead("2025-10-15", "Arsenal", "Chelsea", "1-1", "Premier League"),
+            HeadToHead("2025-03-08", "Chelsea", "Arsenal", "0-2", "Premier League"),
+            HeadToHead("2024-11-03", "Arsenal", "Chelsea", "3-1", "Premier League"),
+            HeadToHead("2024-04-20", "Chelsea", "Arsenal", "2-2", "Premier League"),
+            HeadToHead("2024-01-12", "Arsenal", "Chelsea", "1-0", "Premier League"),
+        ][:limit]
+
+    def get_upcoming_fixtures(self, team_id: str, limit: int = 5) -> Iterable[TeamFixture]:
+        from datetime import timedelta
+        base = utcnow()
+        fixtures_by_team = {
+            "ars": [
+                ("match-up-ars-1", "Premier League", "ARS", "MCI", "Arsenal", "Man City", base + timedelta(days=4), "Etihad"),
+                ("match-up-ars-2", "Premier League", "LIV", "ARS", "Liverpool", "Arsenal", base + timedelta(days=11), "Anfield"),
+                ("match-up-ars-3", "Premier League", "ARS", "TOT", "Arsenal", "Tottenham", base + timedelta(days=18), "Emirates"),
+            ],
+            "che": [
+                ("match-up-che-1", "Premier League", "CHE", "NEW", "Chelsea", "Newcastle", base + timedelta(days=3), "Stamford Bridge"),
+                ("match-up-che-2", "Premier League", "AVL", "CHE", "Aston Villa", "Chelsea", base + timedelta(days=10), "Villa Park"),
+                ("match-up-che-3", "Premier League", "CHE", "BRI", "Chelsea", "Brighton", base + timedelta(days=17), "Stamford Bridge"),
+            ],
+        }
+        rows = fixtures_by_team.get(team_id, [])[:limit]
+        return [
+            TeamFixture(
+                match_id=mid, competition=comp,
+                home_short=hs, away_short=as_, home_name=hn, away_name=an,
+                kickoff=ko, venue=venue,
+            )
+            for mid, comp, hs, as_, hn, an, ko, venue in rows
         ]

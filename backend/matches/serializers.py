@@ -85,13 +85,13 @@ class TeamRefSerializer(serializers.Serializer):
 class FixtureSerializer(serializers.Serializer):
     id = serializers.CharField()
     competition = serializers.CharField()
+    leagueId = serializers.CharField(source="league_id", required=False, default="")
     home = TeamRefSerializer()
     away = TeamRefSerializer()
     kickoff = serializers.DateTimeField()
     status = serializers.CharField()
     coverage = serializers.DictField()
-
-
+    
 class MatchSnapshotSerializer(serializers.Serializer):
     matchId = serializers.CharField(source="match_id")
     competition = serializers.CharField()

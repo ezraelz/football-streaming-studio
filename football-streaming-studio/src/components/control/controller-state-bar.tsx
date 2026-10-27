@@ -1,10 +1,15 @@
 "use client";
-import { useShowStore, ControllerState } from "@/lib/stores/show-store";
+import { useState } from "react";
+import { ArrowRight } from "lucide-react";
+import { useShowStore, type ControllerState } from "@/lib/stores/show-store";
+import { api } from "@/lib/api/client";
 import { cn } from "@/lib/utility/utils";
+import { Button } from "@/components/ui/button";
+import { ConfirmButton } from "@/components/ui/confirm-button";
+import { StatePill } from "@/components/ui/badge";
+import { Alert } from "@/components/ui/feedback";
 
-const STATES: ControllerState[] = [
-  "configured", "armed", "live", "paused", "degraded", "stopped",
-];
+const STATES: ControllerState[] = ["configured", "armed", "live", "paused", "degraded", "stopped"];
 
 // allowed transitions per §10.2
 const ALLOWED: Record<ControllerState, ControllerState[]> = {
@@ -25,71 +30,103 @@ const HINTS: Record<ControllerState, string> = {
   stopped: "Emergency stop engaged. Queued commentary cancelled.",
 };
 
+const ACTION_LABEL: Record<ControllerState, string> = {
+  configured: "Reset to configured",
+  armed: "Arm",
+  live: "Go live",
+  paused: "Pause",
+  degraded: "Mark degraded",
+  stopped: "Stop show",
+};
+
+/**
+ * Reads the *real* session state (the same one the top bar shows) and drives it through the
+ * API. Previously this bar kept its own local state, so it could disagree with the top bar.
+ */
 export function ControllerStateBar() {
-  const { controllerState, setControllerState } = useShowStore();
-  const next = ALLOWED[controllerState];
+  const { session, setSession, emergencyStop } = useShowStore();
+  const [busy, setBusy] = useState<ControllerState | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  if (!session) return null;
+  const current = session.state as ControllerState;
+  const next = ALLOWED[current] ?? [];
+
+  const go = async (target: ControllerState) => {
+    setBusy(target);
+    setError(null);
+    try {
+      const updated = await api.transition(session.id, target);
+      setSession(updated);
+      if (target === "stopped") emergencyStop();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "State change failed");
+    } finally {
+      setBusy(null);
+    }
+  };
 
   return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
-      <div className="flex items-center justify-between">
+    <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <div className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
-            Show Controller
-          </div>
-          <div className="mt-1 flex items-center gap-2">
-            <span
-              className={cn(
-                "rounded px-2 py-0.5 text-xs font-semibold uppercase",
-                controllerState === "live" && "bg-red-600/20 text-red-300",
-                controllerState === "paused" && "bg-amber-600/20 text-amber-300",
-                controllerState === "stopped" && "bg-zinc-700 text-zinc-300",
-                controllerState === "degraded" && "bg-amber-900/40 text-amber-400",
-                (controllerState === "armed" || controllerState === "configured") &&
-                  "bg-blue-600/20 text-blue-300"
-              )}
-            >
-              {controllerState}
-            </span>
-            <span className="text-xs text-zinc-400">{HINTS[controllerState]}</span>
+          <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-400">Show controller</h2>
+          <div className="mt-2 flex flex-wrap items-center gap-3">
+            <StatePill state={current} />
+            <span className="text-sm text-zinc-300">{HINTS[current]}</span>
           </div>
         </div>
 
-        <div className="flex gap-2">
-          {next.map((s) => (
-            <button
-              key={s}
-              onClick={() => setControllerState(s)}
-              className={cn(
-                "rounded border px-3 py-1.5 text-xs font-medium",
-                s === "stopped"
-                  ? "border-red-800 bg-red-950/40 text-red-300 hover:bg-red-900/60"
-                  : s === "live"
-                  ? "border-emerald-700 bg-emerald-900/30 text-emerald-300 hover:bg-emerald-900/50"
-                  : "border-zinc-700 text-zinc-300 hover:bg-zinc-800"
-              )}
-            >
-              → {s}
-            </button>
-          ))}
+        <div className="flex flex-wrap gap-2">
+          {next.map((s) =>
+            s === "stopped" ? (
+              <ConfirmButton
+                key={s}
+                confirmLabel="Click again to stop"
+                loading={busy === s}
+                disabled={busy !== null}
+                onConfirm={() => go(s)}
+              >
+                {ACTION_LABEL[s]}
+              </ConfirmButton>
+            ) : (
+              <Button
+                key={s}
+                variant={s === "live" ? "primary" : "secondary"}
+                onClick={() => go(s)}
+                loading={busy === s}
+                disabled={busy !== null}
+              >
+                {ACTION_LABEL[s]} <ArrowRight className="h-3.5 w-3.5" aria-hidden />
+              </Button>
+            ),
+          )}
         </div>
       </div>
 
-      <div className="mt-3 flex gap-1">
-        {STATES.map((s) => (
-          <div
-            key={s}
-            className={cn(
-              "h-1 flex-1 rounded-full",
-              s === controllerState
-                ? "bg-emerald-500"
-                : STATES.indexOf(s) < STATES.indexOf(controllerState)
-                ? "bg-zinc-600"
-                : "bg-zinc-800"
-            )}
-            title={s}
-          />
-        ))}
-      </div>
+      <ol className="mt-4 grid grid-cols-6 gap-1" aria-label="Show lifecycle">
+        {STATES.map((s, i) => {
+          const idx = STATES.indexOf(current);
+          return (
+            <li key={s} className="flex flex-col gap-1.5">
+              <div
+                className={cn(
+                  "h-1.5 rounded-full",
+                  s === current ? "bg-emerald-500" : i < idx ? "bg-zinc-600" : "bg-zinc-800",
+                )}
+              />
+              <span
+                className={cn("hidden text-xs capitalize sm:block", s === current ? "font-medium text-zinc-100" : "text-zinc-500")}
+                aria-current={s === current ? "step" : undefined}
+              >
+                {s}
+              </span>
+            </li>
+          );
+        })}
+      </ol>
+
+      {error && <Alert tone="error" className="mt-3" onDismiss={() => setError(null)}>{error}</Alert>}
     </div>
   );
 }

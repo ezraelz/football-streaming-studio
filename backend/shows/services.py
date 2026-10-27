@@ -93,3 +93,18 @@ def broadcast_session_update(session) -> None:
         session_group(str(session.id)),
         {"type": "session_event", "data": _serialize_session(session)},
     )
+
+def broadcast_editorial_update(card):
+    from asgiref.sync import async_to_sync
+    from channels.layers import get_channel_layer
+    from audit.groups import session_group
+    from .serializers import EditorialCardSerializer
+
+    channel_layer = get_channel_layer()
+    async_to_sync(channel_layer.group_send)(
+        session_group(str(card.session_id)),
+        {
+            "type": "editorial_event",
+            "data": EditorialCardSerializer(card).data,
+        },
+    )

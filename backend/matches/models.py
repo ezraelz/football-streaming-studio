@@ -6,6 +6,8 @@ class Match(models.Model):
     provider = models.CharField(max_length=64)
     provider_match_id = models.CharField(max_length=128)
     competition = models.CharField(max_length=128)
+    provider_league_id = models.CharField(max_length=64, blank=True, default="")
+    provider_league_name = models.CharField(max_length=128, blank=True, default="")
     home_team_id = models.CharField(max_length=64)
     home_team_name = models.CharField(max_length=128)
     home_team_short = models.CharField(max_length=16)

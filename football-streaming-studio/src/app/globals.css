@@ -1,26 +1,69 @@
 @import "tailwindcss";
 
+/*
+  Design tokens
+  - Surfaces: zinc-950 (app) → zinc-900/60 (panels) → zinc-800 (borders)
+  - Text:     zinc-100 (primary) → zinc-400 (secondary). Avoid zinc-500 for anything
+              the operator must read; it fails contrast on small text.
+  - Accent:   emerald = "go" / primary action / selected
+              red     = on-air and stop ONLY
+              amber   = warnings / stale data
+*/
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  color-scheme: dark;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  background: #09090b;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: #09090b;
+  color: #f4f4f5;
+  font-family: var(--font-sans);
+  font-feature-settings: "cv11", "ss01";
+}
+
+/* Native <select> / date popups follow the dark scheme everywhere. */
+select,
+input,
+textarea {
+  color-scheme: dark;
+}
+
+/* Respect reduced-motion globally (individual components also opt out). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Broadcast overlay: graphics cards slide up and fade in, staggered via --ov-delay. */
+@keyframes ov-card-in {
+  from { opacity: 0; transform: translateY(28px) scale(0.97); }
+  to   { opacity: 1; transform: none; }
+}
+.ov-card-in {
+  animation: ov-card-in 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation-delay: var(--ov-delay, 0ms);
+}
+
+/* Broadcast ticker: the row is rendered twice, so sliding by -50% loops seamlessly. */
+@keyframes ov-marquee {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+.ov-marquee {
+  animation: ov-marquee linear infinite;
+  will-change: transform;
 }

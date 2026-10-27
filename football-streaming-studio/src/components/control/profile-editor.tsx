@@ -1,26 +1,26 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { X } from "lucide-react";
 import { api } from "@/lib/api/client";
-import { ShowProfile, ShowMode } from "@/lib/types/types";
+import type { ShowMode, ShowProfile } from "@/lib/types/types";
+import { Alert } from "@/components/ui/feedback";
+import { Button } from "@/components/ui/button";
+import { Field, Segmented, inputClass } from "@/components/ui/form";
 import { cn } from "@/lib/utility/utils";
-import { X, AlertCircle } from "lucide-react";
 
 export function ProfileEditor({
   initial, onClose, onSaved,
-}: {
-  initial: ShowProfile | null;
-  onClose: () => void;
-  onSaved: () => void;
-}) {
+}: { initial: ShowProfile | null; onClose: () => void; onSaved: () => void }) {
+  const uid = useId();
+  const nameRef = useRef<HTMLInputElement>(null);
+
   const [name, setName] = useState(initial?.name ?? "");
   const [mode, setMode] = useState<ShowMode>(initial?.mode ?? "human");
   const theme = (initial?.theme_config ?? {}) as { primary?: string; accent?: string };
   const [primary, setPrimary] = useState(theme.primary ?? "#10b981");
   const [accent, setAccent] = useState(theme.accent ?? "#3b82f6");
 
-  const commentary = (initial?.commentary_config ?? {}) as {
-    mode?: string; voice?: string; language?: string;
-  };
+  const commentary = (initial?.commentary_config ?? {}) as { mode?: string; voice?: string; language?: string };
   const [commMode, setCommMode] = useState(commentary.mode ?? "approval");
   const [voice, setVoice] = useState(commentary.voice ?? "en-US-Neural-A");
   const [language, setLanguage] = useState(commentary.language ?? "en");
@@ -28,11 +28,20 @@ export function ProfileEditor({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const save = async () => {
+  // Dialog behaviour: focus the first field, close on Escape.
+  useEffect(() => {
+    nameRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault();
     setBusy(true);
     setError(null);
     const payload = {
-      name: name || "Untitled show",
+      name: name.trim() || "Untitled show",
       mode,
       theme_config: { primary, accent, logo: null },
       commentary_config: { mode: commMode, voice, language },
@@ -41,152 +50,138 @@ export function ProfileEditor({
       if (initial) await api.updateProfile(initial.id, payload);
       else await api.createProfile(payload as Omit<ShowProfile, "id">);
       onSaved();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Save failed");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Save failed");
     } finally {
       setBusy(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-      <div className="w-full max-w-md rounded-lg border border-zinc-800 bg-zinc-900 p-5">
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold">
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-0 backdrop-blur-sm sm:items-center sm:p-4"
+      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <form
+        onSubmit={save}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={`${uid}-title`}
+        className="flex max-h-[92dvh] w-full max-w-lg flex-col overflow-hidden rounded-t-2xl border border-zinc-800 bg-zinc-900 sm:rounded-2xl"
+      >
+        <div className="flex items-center justify-between border-b border-zinc-800 px-5 py-4">
+          <h2 id={`${uid}-title`} className="text-lg font-semibold text-zinc-50">
             {initial ? "Edit profile" : "New show profile"}
           </h2>
-          <button onClick={onClose} className="rounded p-1 text-zinc-400 hover:bg-zinc-800">
-            <X className="h-4 w-4" />
-          </button>
+          <Button variant="ghost" size="icon" onClick={onClose} aria-label="Close"><X className="h-4 w-4" /></Button>
         </div>
 
-        {error && (
-          <div className="mb-3 flex items-center gap-2 rounded border border-red-800 bg-red-950/40 p-2 text-xs text-red-300">
-            <AlertCircle className="h-3.5 w-3.5" />
-            {error}
-          </div>
-        )}
+        <div className="space-y-5 overflow-y-auto px-5 py-5">
+          {error && <Alert tone="error">{error}</Alert>}
 
-        <div className="space-y-4">
-          <Field label="Name">
+          <Field label="Name" htmlFor={`${uid}-name`}>
             <input
+              ref={nameRef}
+              id={`${uid}-name`}
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="e.g. Weekly PL Review"
-              className="w-full rounded border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-sm"
+              className={inputClass}
             />
           </Field>
 
-          <Field label="Mode">
-            <div className="grid grid-cols-2 gap-2">
-              {(["human", "automated"] as ShowMode[]).map((m) => (
-                <button
-                  key={m}
-                  onClick={() => setMode(m)}
-                  className={cn(
-                    "rounded border px-3 py-2 text-sm capitalize",
-                    mode === m
-                      ? "border-emerald-600 bg-emerald-600/20 text-emerald-300"
-                      : "border-zinc-700 text-zinc-300 hover:bg-zinc-800"
-                  )}
-                >
-                  {m}
-                </button>
-              ))}
-            </div>
+          <Field label="Who presents?">
+            <Segmented
+              label="Who presents"
+              value={mode}
+              onChange={setMode}
+              options={[
+                { value: "human", label: "Human presenter" },
+                { value: "automated", label: "Automated AI" },
+              ]}
+            />
           </Field>
 
-          <Field label="Theme">
-            <div className="flex gap-3">
+          <Group title="Colours">
+            <div className="flex flex-col gap-3 sm:flex-row">
               <ColorInput label="Primary" value={primary} onChange={setPrimary} />
               <ColorInput label="Accent" value={accent} onChange={setAccent} />
             </div>
-          </Field>
+            <div
+              className="mt-3 flex items-center justify-between rounded-lg px-4 py-3 text-sm font-semibold text-white"
+              style={{ background: `linear-gradient(90deg, ${primary}, ${accent})`, textShadow: "0 1px 2px rgba(0,0,0,.5)" }}
+              aria-hidden
+            >
+              <span>HOME</span><span className="tabular-nums">2 – 1</span><span>AWAY</span>
+            </div>
+          </Group>
 
-          <Field label="Commentary">
-            <div className="space-y-2">
-              <select
-                value={commMode}
-                onChange={(e) => setCommMode(e.target.value)}
-                className="w-full rounded border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-sm"
-              >
-                <option value="off">Off</option>
-                <option value="suggest">Suggest only</option>
-                <option value="approval">Approval required</option>
-                <option value="auto">Automated</option>
-              </select>
-              <div className="flex gap-2">
-                <select
-                  value={voice}
-                  onChange={(e) => setVoice(e.target.value)}
-                  className="flex-1 rounded border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-sm"
-                >
-                  <option value="en-US-Neural-A">en-US Neural A</option>
-                  <option value="en-US-Neural-B">en-US Neural B</option>
-                  <option value="en-GB-Neural-A">en-GB Neural A</option>
-                  <option value="en-GB-Neural-B">en-GB Neural B</option>
+          <Group title="Commentary">
+            <div className="space-y-3">
+              <Field label="Mode" htmlFor={`${uid}-cm`}>
+                <select id={`${uid}-cm`} value={commMode} onChange={(e) => setCommMode(e.target.value)} className={inputClass}>
+                  <option value="off">Off</option>
+                  <option value="suggest">Suggest only</option>
+                  <option value="approval">Approval required</option>
+                  <option value="auto">Automated</option>
                 </select>
-                <select
-                  value={language}
-                  onChange={(e) => setLanguage(e.target.value)}
-                  className="w-24 rounded border border-zinc-700 bg-zinc-950 px-2 py-1.5 text-sm"
-                >
-                  <option value="en">EN</option>
-                  <option value="es">ES</option>
-                  <option value="pt">PT</option>
-                  <option value="fr">FR</option>
-                </select>
+              </Field>
+              <div className="grid grid-cols-[1fr_7rem] gap-3">
+                <Field label="Voice" htmlFor={`${uid}-voice`}>
+                  <select id={`${uid}-voice`} value={voice} onChange={(e) => setVoice(e.target.value)} className={inputClass}>
+                    <option value="en-US-Neural-A">en-US Neural A</option>
+                    <option value="en-US-Neural-B">en-US Neural B</option>
+                    <option value="en-GB-Neural-A">en-GB Neural A</option>
+                    <option value="en-GB-Neural-B">en-GB Neural B</option>
+                  </select>
+                </Field>
+                <Field label="Language" htmlFor={`${uid}-lang`}>
+                  <select id={`${uid}-lang`} value={language} onChange={(e) => setLanguage(e.target.value)} className={inputClass}>
+                    <option value="en">EN</option>
+                    <option value="es">ES</option>
+                    <option value="pt">PT</option>
+                    <option value="fr">FR</option>
+                  </select>
+                </Field>
               </div>
             </div>
-          </Field>
+          </Group>
         </div>
 
-        <div className="mt-5 flex justify-end gap-2">
-          <button onClick={onClose} className="rounded border border-zinc-700 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800">
-            Cancel
-          </button>
-          <button
-            onClick={save}
-            disabled={busy}
-            className="rounded bg-emerald-600 px-3 py-1.5 text-sm font-medium hover:bg-emerald-500 disabled:opacity-40"
-          >
+        <div className="flex justify-end gap-2 border-t border-zinc-800 bg-zinc-900 px-5 py-4">
+          <Button onClick={onClose}>Cancel</Button>
+          <Button type="submit" variant="primary" loading={busy}>
             {busy ? "Saving…" : initial ? "Save changes" : "Create profile"}
-          </button>
+          </Button>
         </div>
-      </div>
+      </form>
     </div>
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Group({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <div>
-      <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-zinc-500">
-        {label}
-      </label>
+    <fieldset className="rounded-xl border border-zinc-800 p-4">
+      <legend className="px-1 text-xs font-semibold uppercase tracking-wider text-zinc-400">{title}</legend>
       {children}
-    </div>
+    </fieldset>
   );
 }
 
-function ColorInput({
-  label, value, onChange,
-}: { label: string; value: string; onChange: (v: string) => void }) {
+function ColorInput({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+  const id = useId();
   return (
     <div className="flex-1">
-      <div className="mb-1 text-[11px] text-zinc-400">{label}</div>
+      <label htmlFor={id} className="mb-1.5 block text-sm font-medium text-zinc-200">{label}</label>
       <div className="flex items-center gap-2">
         <input
           type="color"
+          aria-label={`${label} colour picker`}
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          className="h-8 w-10 cursor-pointer rounded border border-zinc-700 bg-zinc-950 p-0.5"
+          className="h-9 w-11 shrink-0 cursor-pointer rounded-lg border border-zinc-700 bg-zinc-950 p-0.5"
         />
-        <input
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          className="w-full rounded border border-zinc-700 bg-zinc-950 px-2 py-1 font-mono text-xs"
-        />
+        <input id={id} value={value} onChange={(e) => onChange(e.target.value)} className={cn(inputClass, "font-mono text-xs")} />
       </div>
     </div>
   );

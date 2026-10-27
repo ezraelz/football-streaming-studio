@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import Iterable, Optional
 
-from .schemas import Fixture, MatchSnapshot, MatchEvent, Lineup
+from .schemas import Fixture, MatchSnapshot, MatchEvent, Lineup, HeadToHead, TeamFixture
 
 
 class ProviderError(Exception):
@@ -39,3 +39,11 @@ class FootballProvider(ABC):
     @abstractmethod
     def get_lineups(self, match_id: str) -> Iterable[Lineup]:
         """Return available lineups. Empty list is valid."""
+        
+    @abstractmethod
+    def get_head_to_head(self, team_a: str, team_b: str, limit: int = 10) -> Iterable[HeadToHead]:
+        """Return past meetings between the two teams, newest first."""
+
+    @abstractmethod
+    def get_upcoming_fixtures(self, team_id: str, limit: int = 5) -> Iterable[TeamFixture]:
+        """Return upcoming fixtures for a given team."""

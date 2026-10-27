@@ -1,64 +1,105 @@
 "use client";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import {
-  Radio, Calendar, Settings, ListChecks, BarChart3, Home,
-} from "lucide-react";
-import { cn } from "../../lib/utility/utils";
-import { LogOut } from "lucide-react";
+import { usePathname, useRouter } from "next/navigation";
+import { CalendarDays, Clapperboard, LogOut, Radio, Settings, Tv2 } from "lucide-react";
+import { cn } from "@/lib/utility/utils";
 import { clearTokens } from "@/lib/api/client";
-import { useRouter } from "next/navigation";
+import { useShowStore } from "@/lib/stores/show-store";
+import { focusRing } from "@/components/ui/button";
 
-const nav = [
-  { href: "/", label: "Match Browser", icon: Home },
-  { href: "/shows", label: "Show Profiles", icon: Radio },
+const NAV = [
+  { href: "/", label: "Matches", icon: CalendarDays, exact: true },
+  { href: "/shows", label: "Show profiles", icon: Clapperboard },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
 export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
+  const { session, snapshot } = useShowStore();
+
+  const hasShow = session && session.state !== "stopped";
+  const inStudio = pathname.startsWith("/studio");
 
   const logout = () => {
     clearTokens();
     router.replace("/login");
   };
+
   return (
-    <aside className="flex w-56 flex-col border-r border-zinc-800 bg-zinc-900/50">
-      <div className="border-b border-zinc-800 px-4 py-5">
-        <div className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
-          Football
+    <aside className="flex h-full w-60 flex-col border-r border-zinc-800 bg-zinc-900">
+      <div className="flex items-center gap-3 border-b border-zinc-800 px-4 py-4">
+        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-600 text-white" aria-hidden>
+          <Tv2 className="h-5 w-5" />
         </div>
-        <div className="text-lg font-bold">Streaming Studio</div>
+        <div className="leading-tight">
+          <div className="text-sm font-semibold text-zinc-50">Streaming Studio</div>
+          <div className="text-xs text-zinc-400">Football production</div>
+        </div>
       </div>
-      <nav className="flex-1 space-y-1 p-2">
-        {nav.map(({ href, label, icon: Icon }) => {
-          const active = pathname === href;
+
+      {/* Current show — always one click away, wherever you are */}
+      {hasShow && (
+        <div className="px-3 pt-3">
+          <Link
+            href={`/studio/${session.id}`}
+            className={cn(
+              "block rounded-lg border px-3 py-2.5 transition-colors",
+              focusRing,
+              inStudio
+                ? "border-emerald-700/60 bg-emerald-600/15"
+                : "border-zinc-700 bg-zinc-800/60 hover:bg-zinc-800",
+            )}
+          >
+            <div className="flex items-center gap-2 text-xs font-medium text-zinc-300">
+              <Radio
+                className={cn("h-3.5 w-3.5", session.state === "live" ? "text-red-400" : "text-amber-400")}
+                aria-hidden
+              />
+              Current show
+              <span className="ml-auto capitalize text-zinc-400">{session.state}</span>
+            </div>
+            <div className="mt-1 truncate text-sm font-semibold text-zinc-50">
+              {snapshot ? `${snapshot.home.shortName} v ${snapshot.away.shortName}` : "Open studio"}
+            </div>
+          </Link>
+        </div>
+      )}
+
+      <nav aria-label="Main" className="flex-1 space-y-1 p-3">
+        {NAV.map(({ href, label, icon: Icon, exact }) => {
+          const active = exact ? pathname === href : pathname.startsWith(href);
           return (
             <Link
               key={href}
               href={href}
+              aria-current={active ? "page" : undefined}
               className={cn(
-                "flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors",
+                "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                focusRing,
                 active
-                  ? "bg-emerald-600/20 text-emerald-300"
-                  : "text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
+                  ? "bg-zinc-800 text-zinc-50"
+                  : "text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-100",
               )}
             >
-              <Icon className="h-4 w-4" />
+              <Icon className={cn("h-4 w-4", active && "text-emerald-400")} aria-hidden />
               {label}
             </Link>
           );
         })}
       </nav>
-      <button
-        onClick={logout}
-        className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-xs text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100"
-      >
-        <LogOut className="h-3.5 w-3.5" /> Sign out
-      </button>
-      <div className="border-t border-zinc-800 p-3 text-xs text-zinc-500">
-        v1.0 · MVP
+
+      <div className="border-t border-zinc-800 p-3">
+        <button
+          onClick={logout}
+          className={cn(
+            "flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-zinc-400 transition-colors hover:bg-zinc-800/60 hover:text-zinc-100",
+            focusRing,
+          )}
+        >
+          <LogOut className="h-4 w-4" aria-hidden /> Sign out
+        </button>
+        <div className="mt-2 px-3 text-xs text-zinc-500">v1.0 · MVP</div>
       </div>
     </aside>
   );

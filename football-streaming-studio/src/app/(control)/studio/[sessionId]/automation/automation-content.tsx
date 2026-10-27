@@ -1,47 +1,51 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-import Link from "next/link";
-import { api, AutomationRule } from "@/lib/api/client";
+import { Plus, Workflow, Zap } from "lucide-react";
+import { api, type AutomationRule } from "@/lib/api/client";
 import { useSocket } from "@/lib/hooks/use-socket";
+import { useShowStore } from "@/lib/stores/show-store";
 import { ControllerStateBar } from "@/components/control/controller-state-bar";
 import { AutomationRuleCard } from "@/components/control/automation-rule-card";
-import { Plus, Info, AlertTriangle } from "lucide-react";
+import { PageHeader } from "@/components/ui/page-header";
+import { Alert, EmptyState, Skeleton } from "@/components/ui/feedback";
+import { Button } from "@/components/ui/button";
 
 export function AutomationContent() {
   const params = useParams<{ sessionId: string }>();
+  const setSession = useShowStore((s) => s.setSession);
 
   const [profileId, setProfileId] = useState<string | null>(null);
   const [rules, setRules] = useState<AutomationRule[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [adding, setAdding] = useState(false);
+  const [newId, setNewId] = useState<string | null>(null);
   const [lastCommand, setLastCommand] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
       const s = await api.getSession(params.sessionId);
+      setSession(s); // keep the shared store (and the controller bar) in sync after a reload
       setProfileId(s.show_profile_id);
-      const list = await api.listAutomationRules(s.show_profile_id);
-      setRules(list);
+      setRules(await api.listAutomationRules(s.show_profile_id));
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load");
     } finally {
       setLoading(false);
     }
-  }, [params.sessionId]);
+  }, [params.sessionId, setSession]);
 
-  useEffect(() => {
-    void Promise.resolve().then(refresh);
-  }, [refresh]);
+  useEffect(() => { void Promise.resolve().then(refresh); }, [refresh]);
 
   // Listen for automation-driven scene commands — shows the operator what fired
   useSocket<{ scene_id: string; rule_id: string | null }>(
     `/ws/v1/show-sessions/${params.sessionId}`,
     (msg) => {
       if (msg.type === "scene.command") {
-        setLastCommand(`Scene → ${msg.data.scene_id} (automation)`);
+        setLastCommand(`Automation switched the scene to “${msg.data.scene_id}”.`);
         setTimeout(() => setLastCommand(null), 5000);
       }
     },
@@ -49,8 +53,9 @@ export function AutomationContent() {
 
   const addRule = async () => {
     if (!profileId) return;
+    setAdding(true);
     try {
-      await api.createAutomationRule(profileId, {
+      const created = await api.createAutomationRule(profileId, {
         label: "New rule",
         enabled: false,
         event_type: "goal",
@@ -60,23 +65,28 @@ export function AutomationContent() {
         require_fresh_match_state: true,
         cooldown_seconds: 10,
       });
-      await refresh();
+      setRules((prev) => [...prev, created]);
+      setNewId(created.id); // open it straight away so it can be edited
     } catch (e) {
       setError(e instanceof Error ? e.message : "Create failed");
+    } finally {
+      setAdding(false);
     }
   };
 
   const updateRule = async (id: string, patch: Partial<AutomationRule>) => {
+    const before = rules;
+    setRules((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r))); // optimistic
     try {
       const updated = await api.updateAutomationRule(id, patch);
-      setRules((prev) => prev.map((r) => r.id === id ? updated : r));
+      setRules((prev) => prev.map((r) => (r.id === id ? updated : r)));
     } catch (e) {
+      setRules(before);
       setError(e instanceof Error ? e.message : "Update failed");
     }
   };
 
   const deleteRule = async (id: string) => {
-    if (!confirm("Delete this rule?")) return;
     try {
       await api.deleteAutomationRule(id);
       setRules((prev) => prev.filter((r) => r.id !== id));
@@ -85,75 +95,60 @@ export function AutomationContent() {
     }
   };
 
-  if (loading) {
-    return <div className="p-6 text-sm text-zinc-500">Loading automation rules…</div>;
-  }
+  const enabled = rules.filter((r) => r.enabled).length;
 
   return (
-    <div className="mx-auto flex h-full max-w-5xl flex-col gap-6">
-      <header className="flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">Automation Rules</h1>
-          <p className="text-sm text-zinc-400">
-            Configured rules run automatically when a matching event lands during a live session.
-          </p>
-        </div>
-        <Link
-          href={`/studio/${params.sessionId}`}
-          className="rounded-md border border-zinc-700 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-800"
-        >
-          ← Back to Studio
-        </Link>
-      </header>
+    <div className="mx-auto flex max-w-4xl flex-col gap-6">
+      <PageHeader
+        title="Automation"
+        description="Rules that run on their own when a matching event lands during a live show."
+      />
 
       <ControllerStateBar />
 
-      {error && (
-        <div className="rounded border border-red-800 bg-red-950/40 p-3 text-sm text-red-300">
-          {error}
-        </div>
-      )}
-
+      {error && <Alert tone="error" onDismiss={() => setError(null)}>{error}</Alert>}
       {lastCommand && (
-        <div className="rounded border border-emerald-800/60 bg-emerald-950/30 p-2 text-xs text-emerald-300">
-          <AlertTriangle className="mr-1.5 inline h-3.5 w-3.5" />
-          {lastCommand}
-        </div>
+        <Alert tone="success"><span className="flex items-center gap-1.5"><Zap className="h-3.5 w-3.5" aria-hidden />{lastCommand}</span></Alert>
       )}
 
-      <div className="rounded-md border border-blue-800/50 bg-blue-950/30 p-3 text-xs text-blue-200/80">
-        <div className="flex items-start gap-2">
-          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          <div>
-            <strong className="text-blue-200">Automation is rule-driven, not LLM-driven.</strong>{" "}
-            The backend executes only the actions you configure here. Every action is audited with
-            its rule ID, event ID and outcome.
-          </div>
-        </div>
+      <Alert tone="info">
+        <strong className="font-semibold">Rules, not AI judgement.</strong>{" "}
+        The backend only does what you configure here, and records every action with its rule, event and outcome.
+      </Alert>
+
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-sm font-semibold text-zinc-100">
+          Rules{!loading && <span className="ml-2 font-normal text-zinc-400">{enabled} of {rules.length} on</span>}
+        </h2>
+        <Button variant="primary" onClick={addRule} loading={adding} disabled={!profileId}>
+          {!adding && <Plus className="h-4 w-4" aria-hidden />} New rule
+        </Button>
       </div>
 
-      <div className="flex items-center justify-between">
-        <div className="text-xs text-zinc-500">
-          {rules.filter((r) => r.enabled).length} of {rules.length} rules enabled
+      {loading ? (
+        <div className="flex flex-col gap-3" aria-busy="true">
+          <Skeleton className="h-20" /><Skeleton className="h-20" />
         </div>
-        <button
-          onClick={addRule}
-          className="flex items-center gap-1.5 rounded bg-emerald-600 px-3 py-1.5 text-xs font-medium hover:bg-emerald-500"
-        >
-          <Plus className="h-3.5 w-3.5" /> New rule
-        </button>
-      </div>
-
-      <div className="flex flex-col gap-2">
-        {rules.map((r) => (
-          <AutomationRuleCard
-            key={r.id}
-            rule={r}
-            onUpdate={(patch) => updateRule(r.id, patch)}
-            onDelete={() => deleteRule(r.id)}
-          />
-        ))}
-      </div>
+      ) : rules.length === 0 ? (
+        <EmptyState
+          icon={<Workflow className="h-6 w-6" />}
+          title="No automation rules yet"
+          description="Create a rule to switch scenes or draft commentary automatically — for example, show the scoreboard on every confirmed goal."
+          action={<Button variant="primary" onClick={addRule} disabled={!profileId}><Plus className="h-4 w-4" aria-hidden /> Create the first rule</Button>}
+        />
+      ) : (
+        <div className="flex flex-col gap-3">
+          {rules.map((r) => (
+            <AutomationRuleCard
+              key={r.id}
+              rule={r}
+              defaultExpanded={r.id === newId}
+              onUpdate={(patch) => updateRule(r.id, patch)}
+              onDelete={() => deleteRule(r.id)}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

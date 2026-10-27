@@ -76,3 +76,46 @@ def get_lineups(request, match_id: str):
 
     dtos = [lineup_model_to_dto(l) for l in match.lineups.all()]
     return Response(LineupSerializer(dtos, many=True).data)
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def get_h2h(request, match_id):
+    try:
+        match = Match.objects.get(provider_match_id=match_id)
+    except Match.DoesNotExist:
+        return Response({"detail": "match not found"}, status=404)
+
+    from providers.registry import get_provider
+    from dataclasses import asdict
+    meetings = list(get_provider().get_head_to_head(match.home_team_id, match.away_team_id))
+    return Response([asdict(m) for m in meetings])
+
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def get_team_fixtures(request, team_id):
+    from providers.registry import get_provider
+    from dataclasses import asdict
+    rows = list(get_provider().get_upcoming_fixtures(team_id))
+    return Response([asdict(r) for r in rows])
+
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def get_prediction(request, match_id):
+    try:
+        match = Match.objects.get(provider_match_id=match_id)
+    except Match.DoesNotExist:
+        return Response({"detail": "match not found"}, status=404)
+
+    from providers.registry import get_provider
+    from dataclasses import asdict
+    from analysis.predictions import predict_from_h2h
+
+    provider = get_provider()
+    h2h = [asdict(m) for m in provider.get_head_to_head(match.home_team_id, match.away_team_id)]
+    result = predict_from_h2h(match.home_team_name, match.away_team_name, h2h)
+    result["match_id"] = match.provider_match_id
+    result["team_a"] = match.home_team_name
+    result["team_b"] = match.away_team_name
+    return Response(result)

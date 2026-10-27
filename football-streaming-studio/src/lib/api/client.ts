@@ -1,8 +1,8 @@
 import type {
-  Fixture, MatchSnapshot, MatchEvent, ShowProfile, ShowSession,
+  MatchSnapshot, MatchEvent, ShowProfile, ShowSession,
 } from "@/lib/types/types";
 
-const BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://localhost:8000";
+const BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://127.0.0.1:8000";
 
 const ACCESS_KEY = "fss.access_token";
 const REFRESH_KEY = "fss.refresh_token";
@@ -95,15 +95,33 @@ async function tryRefresh(): Promise<boolean> {
 
 export interface LoginResponse { access: string; refresh: string }
 
+export interface Fixture {
+  id: string;
+  competition: string;
+  leagueId: string;   // new — empty string for unknown
+  home: TeamRef;
+  away: TeamRef;
+  kickoff: string;
+  status: string;
+  coverage: Record<string, boolean>;
+}
+
 export interface TeamRef {
   id: string;
   name: string;
   shortName: string;
   color: string;
+  crestUrl?: string | null;
 }
 
 export interface OverlayState {
   session_id: string;
+  /** League name, used to theme the graphics (optional). */
+  competition?: string;
+  /** Scene currently selected in the studio (optional). Lets a single OBS source follow scene changes. */
+  scene_id?: string | null;
+  /** Cards currently on air (optional). Lets OBS restore graphics after a reload / scene switch. */
+  editorial_cards?: EditorialCard[];
   state: "configured" | "armed" | "live" | "paused" | "degraded" | "stopped";
   match_id: string;
   home: TeamRef;
@@ -181,6 +199,51 @@ export interface SpeechJob {
   duration_seconds: number | null;
   created_at: string;
   played_at: string | null;
+}
+
+export interface EditorialCard {
+  id: string;
+  session_id: string;
+  card_type:
+    | "fixture_intro" | "lineups" | "standings" | "form"
+    | "head_to_head" | "top_scorers" | "match_summary"
+    | "countdown" | "custom";
+  title: string;
+  payload: Record<string, unknown>;
+  visible: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface H2HMeeting {
+  date: string;
+  home_team: string;
+  away_team: string;
+  score: string;
+  competition: string;
+}
+
+export interface TeamFixture {
+  match_id: string;
+  competition: string;
+  home_short: string;
+  away_short: string;
+  home_name: string;
+  away_name: string;
+  kickoff: string;
+  venue: string | null;
+}
+
+export interface Prediction {
+  match_id: string;
+  team_a: string;
+  team_b: string;
+  probabilities: { home_win: number; draw: number; away_win: number } | null;
+  sample_size: number;
+  raw_counts?: { wins_a: number; draws: number; wins_b: number };
+  model_version: string;
+  timestamp: string;
+  reason?: string;
 }
 
 // --- typed surface ---
@@ -273,10 +336,17 @@ export const api = {
 
   // add to the api object:
   setScene: (sessionId: string, sceneId: string) =>
-    request<{ scene_id: string }>(`/show-sessions/${sessionId}/set-scene`, {
-      method: "POST",
-      body: JSON.stringify({ scene_id: sceneId }),
-    }),
+    request<{ scene_id: string; obs_scene: string; obs_ok: boolean }>(
+      `/show-sessions/${sessionId}/set-scene`,
+      { method: "POST", body: JSON.stringify({ scene_id: sceneId }) },
+    ),
+
+  provisionObs: (sessionId: string) =>
+    request<{
+      session_id: string;
+      obs_connected: boolean;
+      results: Array<{ scene_key: string; obs_scene: string; created_or_updated: boolean }>;
+    }>(`/show-sessions/${sessionId}/provision-obs`, { method: "POST" }),
 
   obsStatus: () =>
     request<{ connected: boolean; current_scene: string | null }>("/obs/status"),
@@ -290,5 +360,36 @@ export const api = {
     request<SpeechJob>(`/commentary/${itemId}/speak`, { method: "POST" }),
   markPlayed: (itemId: string) =>
     request<{ status: string }>(`/commentary/${itemId}/played`, { method: "POST" }),
+
+  listEditorialCards: (sessionId: string) =>
+  request<EditorialCard[]>(`/show-sessions/${sessionId}/editorial-cards`),
+  createEditorialCard: (sessionId: string, body: Partial<EditorialCard>) =>
+    request<EditorialCard>(`/show-sessions/${sessionId}/editorial-cards`, {
+      method: "POST", body: JSON.stringify(body),
+    }),
+  updateEditorialCard: (sessionId: string, cardId: string, patch: Partial<EditorialCard>) =>
+    request<EditorialCard>(`/show-sessions/${sessionId}/editorial-cards/${cardId}`, {
+      method: "PATCH", body: JSON.stringify(patch),
+    }),
+  deleteEditorialCard: (sessionId: string, cardId: string) =>
+    request<void>(`/show-sessions/${sessionId}/editorial-cards/${cardId}`, {
+      method: "DELETE",
+    }),
+  broadcastEditorialCard: (sessionId: string, cardId: string) =>
+    request<EditorialCard>(`/show-sessions/${sessionId}/editorial-cards/${cardId}/broadcast`, {
+      method: "POST",
+    }),
+  hideAllEditorial: (sessionId: string) =>
+    request<{ hidden: boolean }>(`/show-sessions/${sessionId}/editorial-cards/hide`, {
+      method: "POST",
+    }),
+  seedEditorialCard: (sessionId: string, cardType: string) =>
+    request<EditorialCard>(`/show-sessions/${sessionId}/editorial-cards/seed/${cardType}`, {
+      method: "POST",
+    }),
+
+  h2h: (matchId: string) => request<H2HMeeting[]>(`/matches/${matchId}/h2h`),
+  prediction: (matchId: string) => request<Prediction>(`/matches/${matchId}/prediction`),
+  teamFixtures: (teamId: string) => request<TeamFixture[]>(`/teams/${teamId}/fixtures`),
 };
 

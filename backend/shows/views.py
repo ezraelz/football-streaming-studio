@@ -6,13 +6,14 @@ from rest_framework.response import Response
 
 from matches.models import Match
 
-from .models import ShowProfile, ShowSession
+from .models import ShowProfile, ShowSession, EditorialCard
 from .services import (
     create_session, transition, rotate_token, InvalidTransition,
 )
 from .serializers import (
     ShowProfileSerializer, ShowProfileCreateSerializer,
     ShowSessionSerializer, CreateShowSessionSerializer,
+    EditorialCardSerializer,
 )
 
 
@@ -63,6 +64,13 @@ def set_scene(request, session_id):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
+    from shows.obs_config import obs_scene_name
+    from shows import obs_client
+
+    obs_scene = obs_scene_name(scene_id)
+    obs_ok = obs_client.set_current_scene(obs_scene)
+
+    # Always broadcast to the overlay (so its preview follows even if OBS is off)
     from automation.services import broadcast_scene_command
     from audit.services import log_and_broadcast
     from audit.models import LogKind
@@ -71,10 +79,19 @@ def set_scene(request, session_id):
     log_and_broadcast(
         session, LogKind.SCENE,
         f"Scene → {scene_id}",
-        detail={"source": "manual"},
+        detail={
+            "source": "manual",
+            "obs_ok": obs_ok,
+            "obs_scene": obs_scene,
+        },
     )
-    return Response({"scene_id": scene_id})
 
+    return Response({
+        "scene_id": scene_id,
+        "obs_scene": obs_scene,
+        "obs_ok": obs_ok,
+    })
+    
 # --- Show Sessions ---
 
 @api_view(["GET", "POST"])
@@ -291,4 +308,344 @@ def obs_status(request):
         "connected": obs_client.is_connected(),
         "current_scene": obs_client.get_current_scene(),
     })
+    
+
+def _broadcast_editorial(card):
+    """Push a card update to all subscribers of this session."""
+    from asgiref.sync import async_to_sync
+    from channels.layers import get_channel_layer
+    from audit.groups import session_group
+
+    layer = get_channel_layer()
+    async_to_sync(layer.group_send)(
+        session_group(str(card.session_id)),
+        {"type": "editorial_event", "data": EditorialCardSerializer(card).data},
+    )
+
+
+@api_view(["GET", "POST"])
+@permission_classes([IsAuthenticated])
+def editorial_cards(request, session_id):
+    session = get_object_or_404(
+        ShowSession, id=session_id, show_profile__owner=request.user
+    )
+
+    if request.method == "GET":
+        return Response(EditorialCardSerializer(session.editorial_cards.all(), many=True).data)
+
+    ser = EditorialCardSerializer(data=request.data)
+    ser.is_valid(raise_exception=True)
+    card = ser.save(session=session)
+    return Response(EditorialCardSerializer(card).data, status=status.HTTP_201_CREATED)
+
+
+@api_view(["GET", "PATCH", "DELETE"])
+@permission_classes([IsAuthenticated])
+def editorial_card_detail(request, session_id, card_id):
+    card = get_object_or_404(
+        EditorialCard, id=card_id, session__show_profile__owner=request.user
+    )
+
+    if request.method == "GET":
+        return Response(EditorialCardSerializer(card).data)
+    if request.method == "DELETE":
+        card.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    ser = EditorialCardSerializer(card, data=request.data, partial=True)
+    ser.is_valid(raise_exception=True)
+    card = ser.save()
+
+    if "visible" in request.data:
+        _broadcast_editorial(card)
+    return Response(EditorialCardSerializer(card).data)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def broadcast_editorial(request, session_id, card_id):
+    card = get_object_or_404(
+        EditorialCard, id=card_id, session__show_profile__owner=request.user
+    )
+    # Only one editorial card visible at a time
+    card.session.editorial_cards.exclude(id=card.id).update(visible=False)
+    card.visible = True
+    card.save(update_fields=["visible", "updated_at"])
+    _broadcast_editorial(card)
+
+    from audit.services import log_and_broadcast
+    from audit.models import LogKind
+    log_and_broadcast(
+        card.session, LogKind.SCENE,
+        f"Editorial card shown: {card.title} ({card.card_type})",
+        detail={"card_id": str(card.id), "card_type": card.card_type},
+    )
+
+    return Response(EditorialCardSerializer(card).data)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def hide_all_editorial(request, session_id):
+    session = get_object_or_404(
+        ShowSession, id=session_id, show_profile__owner=request.user
+    )
+    session.editorial_cards.filter(visible=True).update(visible=False)
+
+    # Broadcast an empty "visible: false" for the session
+    from asgiref.sync import async_to_sync
+    from channels.layers import get_channel_layer
+    from audit.groups import session_group
+
+    layer = get_channel_layer()
+    async_to_sync(layer.group_send)(
+        session_group(str(session.id)),
+        {"type": "editorial_event", "data": {"visible": False, "session_id": str(session.id)}},
+    )
+    return Response({"hidden": True})
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def seed_editorial(request, session_id, card_type):
+    """Pre-fill an editorial card from the current Match / MatchSnapshot / BSD."""
+    import os
+    import logging
+    import requests as http
+
+    from matches.models import Match
+
+    log = logging.getLogger(__name__)
+
+    session = get_object_or_404(
+        ShowSession, id=session_id, show_profile__owner=request.user
+    )
+    match = session.match
+    snapshot = getattr(match, "snapshot", None)
+
+    def bsd_get(path, params=None):
+        """Call BSD with proper error logging. Returns None on any failure."""
+        api_key = os.getenv("FOOTBALL_API_KEY")
+        if not api_key:
+            log.warning("seed_editorial: FOOTBALL_API_KEY missing")
+            return None
+        try:
+            r = http.get(
+                f"https://sports.bzzoiro.com/api/v2{path}",
+                headers={"Authorization": f"Token {api_key}"},
+                params=params,
+                timeout=10,
+            )
+            if not r.ok:
+                log.warning("bsd_get %s → HTTP %s: %s", path, r.status_code, r.text[:200])
+                return None
+            return r.json()
+        except Exception as e:
+            log.warning("bsd_get %s failed: %s", path, e)
+            return None
+
+    # Season derivation: BSD seasons are usually named by start year
+    # (e.g. "2026/2027" → 2026). Use the match year minus a bit if in H1.
+    kickoff_year = match.kickoff.year
+    kickoff_month = match.kickoff.month
+    season_year = kickoff_year if kickoff_month >= 7 else kickoff_year - 1
+
+    base = {
+        "competition": match.competition or "Unknown",
+        "home": {"name": match.home_team_name or match.home_team_short, "color": match.home_team_color or "#27272a"},
+        "away": {"name": match.away_team_name or match.away_team_short, "color": match.away_team_color or "#27272a"},
+    }
+
+    # --- fixture_intro ---
+    if card_type == "fixture_intro":
+        payload = {
+            **base,
+            "kickoff_label": match.kickoff.strftime("Kickoff · %a %H:%M"),
+            "venue": "",
+        }
+        title = f"{match.home_team_short} vs {match.away_team_short}"
+
+    # --- countdown ---
+    elif card_type == "countdown":
+        payload = {
+            "competition": base["competition"],
+            "home_name": base["home"]["name"],
+            "away_name": base["away"]["name"],
+            "kickoff": match.kickoff.isoformat(),
+        }
+        title = f"Countdown · {match.home_team_short} vs {match.away_team_short}"
+
+    # --- match_summary ---
+    elif card_type == "match_summary":
+        goals = [
+            {
+                "minute": e.minute,
+                "player": e.player_name or "—",
+                "team": (
+                    match.home_team_short if e.team_id == match.home_team_id
+                    else match.away_team_short
+                ),
+            }
+            for e in match.events.filter(type="goal").order_by("minute")
+        ]
+        payload = {
+            **base,
+            "score": {
+                "home": snapshot.score_home if snapshot else 0,
+                "away": snapshot.score_away if snapshot else 0,
+            },
+            "goals": goals,
+        }
+        title = f"FT · {match.home_team_short} {payload['score']['home']}–{payload['score']['away']} {match.away_team_short}"
+
+    # --- lineups ---
+    elif card_type == "lineups":
+        data = bsd_get(f"/events/{match.provider_match_id}/lineups/")
+        if data and data.get("lineups"):
+            lu = data["lineups"]
+            payload = {
+                "home": {
+                    "formation": (lu.get("home") or {}).get("formation", ""),
+                    "players": (lu.get("home") or {}).get("players", []),
+                },
+                "away": {
+                    "formation": (lu.get("away") or {}).get("formation", ""),
+                    "players": (lu.get("away") or {}).get("players", []),
+                },
+            }
+            title = f"Lineups · {match.home_team_short} vs {match.away_team_short}"
+        else:
+            payload = {
+                "home": {"formation": "TBD", "players": []},
+                "away": {"formation": "TBD", "players": []},
+            }
+            title = f"Lineups · {match.home_team_short} vs {match.away_team_short} (manual)"
+
+    # --- standings ---
+    elif card_type == "standings":
+        league_id = getattr(match, "provider_league_id", "") or ""
+        rows: list[dict] = []
+
+        if league_id:
+            data = bsd_get(
+                f"/leagues/{league_id}/standings/",
+                params={"season_id": season_year},
+            )
+            if data:
+                # BSD standings shape varies: try common keys
+                table = data.get("standings") or data.get("table") or data.get("results") or []
+                if isinstance(table, list):
+                    for row in table:
+                        if not isinstance(row, dict):
+                            continue
+                        rows.append({
+                            "position": row.get("position") or row.get("rank") or 0,
+                            "team": row.get("team_name") or row.get("team") or "",
+                            "played": row.get("played") or row.get("matches") or 0,
+                            "points": row.get("points") or 0,
+                        })
+
+        payload = {
+            "competition": base["competition"],
+            "rows": rows,
+        }
+        title = f"{base['competition']} Standings"
+
+    # --- top_scorers ---
+    elif card_type == "top_scorers":
+        league_id = getattr(match, "provider_league_id", "") or ""
+        players: list[dict] = []
+
+        if league_id:
+            data = bsd_get(
+                f"/leagues/{league_id}/topscorers/",
+                params={"season_id": season_year},
+            )
+            if data:
+                scorers = data.get("scorers") or data.get("results") or []
+                if isinstance(scorers, list):
+                    for s in scorers[:10]:
+                        if not isinstance(s, dict):
+                            continue
+                        players.append({
+                            "name": s.get("player_name") or s.get("name") or "",
+                            "team": s.get("team_name") or s.get("team") or "",
+                            "goals": s.get("goals") or 0,
+                        })
+
+        payload = {
+            "competition": base["competition"],
+            "players": players,
+        }
+        title = f"{base['competition']} Top Scorers"
+
+    # --- head_to_head ---
+    elif card_type == "head_to_head":
+        payload = {"meetings": []}
+        title = f"H2H · {match.home_team_short} vs {match.away_team_short}"
+
+    # --- form ---
+    elif card_type == "form":
+        payload = {
+            "team": base["home"]["name"],
+            "results": [],
+        }
+        title = f"Recent form · {base['home']['name']}"
+
+    # --- custom / unknown ---
+    else:
+        payload = base
+        title = card_type.replace("_", " ").title()
+
+    card = EditorialCard.objects.create(
+        session=session,
+        card_type=card_type,
+        title=title,
+        payload=payload,
+    )
+    return Response(EditorialCardSerializer(card).data, status=status.HTTP_201_CREATED)
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def provision_obs(request, session_id):
+    """
+    (Re)create OBS scenes and browser sources for an existing session.
+    Idempotent — safe to call repeatedly.
+    """
+    session = get_object_or_404(
+        ShowSession.objects.select_related("show_profile", "match"),
+        id=session_id,
+        show_profile__owner=request.user,
+    )
+
+    from shows.obs_config import obs_scene_name
+    from shows import obs_client
+    import os
+
+    overlay_base = os.getenv("OVERLAY_BASE_URL", "http://localhost:3000")
+    overlay_url_base = f"{overlay_base}/overlay/{session.id}"
+
+    SCENE_KEYS = ["scoreboard", "timeline", "stats", "tactical", "player", "lower-third"]
+
+    results = []
+    for scene_key in SCENE_KEYS:
+        obs_scene = obs_scene_name(scene_key)
+        url = f"{overlay_url_base}?scene={scene_key}&token={session.overlay_token}"
+        ok = obs_client.ensure_scene_with_browser_source(
+            scene_name=obs_scene,
+            source_name=f"Overlay {scene_key}",
+            url=url,
+        )
+        results.append({
+            "scene_key": scene_key,
+            "obs_scene": obs_scene,
+            "created_or_updated": ok,
+        })
+
+    return Response({
+        "session_id": str(session.id),
+        "obs_connected": obs_client.is_connected(),
+        "results": results,
+    })
+    
     
