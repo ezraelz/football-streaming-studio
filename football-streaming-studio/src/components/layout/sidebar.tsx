@@ -6,16 +6,19 @@ import { cn } from "@/lib/utility/utils";
 import { clearTokens } from "@/lib/api/client";
 import { useShowStore } from "@/lib/stores/show-store";
 import { focusRing } from "@/components/ui/button";
+import { useT } from "@/lib/i18n";
+import { LanguageSwitch, ThemeSwitch } from "@/components/ui/prefs";
 
 const NAV = [
-  { href: "/", label: "Matches", icon: CalendarDays, exact: true },
-  { href: "/shows", label: "Show profiles", icon: Clapperboard },
-  { href: "/settings", label: "Settings", icon: Settings },
-];
+  { href: "/", key: "nav.matches", icon: CalendarDays, exact: true },
+  { href: "/shows", key: "nav.shows", icon: Clapperboard },
+  { href: "/settings", key: "nav.settings", icon: Settings },
+] as const;
 
 export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
+  const t = useT();
   const { session, snapshot } = useShowStore();
 
   const hasShow = session && session.state !== "stopped";
@@ -33,8 +36,8 @@ export function Sidebar() {
           <Tv2 className="h-5 w-5" />
         </div>
         <div className="leading-tight">
-          <div className="text-sm font-semibold text-zinc-50">Streaming Studio</div>
-          <div className="text-xs text-zinc-400">Football production</div>
+          <div className="text-sm font-semibold text-zinc-50">{t("app.name")}</div>
+          <div className="text-xs text-zinc-400">{t("app.tagline")}</div>
         </div>
       </div>
 
@@ -56,18 +59,19 @@ export function Sidebar() {
                 className={cn("h-3.5 w-3.5", session.state === "live" ? "text-red-400" : "text-amber-400")}
                 aria-hidden
               />
-              Current show
-              <span className="ml-auto capitalize text-zinc-400">{session.state}</span>
+              {t("nav.currentShow")}
+              <span className="ml-auto text-zinc-400">{t(`state.${session.state}` as const)}</span>
             </div>
             <div className="mt-1 truncate text-sm font-semibold text-zinc-50">
-              {snapshot ? `${snapshot.home.shortName} v ${snapshot.away.shortName}` : "Open studio"}
+              {snapshot ? `${snapshot.home.shortName} v ${snapshot.away.shortName}` : t("nav.openStudio")}
             </div>
           </Link>
         </div>
       )}
 
-      <nav aria-label="Main" className="flex-1 space-y-1 p-3">
-        {NAV.map(({ href, label, icon: Icon, exact }) => {
+      <nav aria-label={t("nav.main")} className="flex-1 space-y-1 p-3">
+        {NAV.map(({ href, key, icon: Icon, ...rest }) => {
+          const exact = "exact" in rest ? rest.exact : false;
           const active = exact ? pathname === href : pathname.startsWith(href);
           return (
             <Link
@@ -83,13 +87,17 @@ export function Sidebar() {
               )}
             >
               <Icon className={cn("h-4 w-4", active && "text-emerald-400")} aria-hidden />
-              {label}
+              {t(key)}
             </Link>
           );
         })}
       </nav>
 
-      <div className="border-t border-zinc-800 p-3">
+      <div className="space-y-2 border-t border-zinc-800 p-3">
+        <div className="flex flex-wrap items-center gap-2 px-1">
+          <LanguageSwitch compact />
+          <ThemeSwitch />
+        </div>
         <button
           onClick={logout}
           className={cn(
@@ -97,9 +105,9 @@ export function Sidebar() {
             focusRing,
           )}
         >
-          <LogOut className="h-4 w-4" aria-hidden /> Sign out
+          <LogOut className="h-4 w-4" aria-hidden /> {t("nav.signOut")}
         </button>
-        <div className="mt-2 px-3 text-xs text-zinc-500">v1.0 · MVP</div>
+        <div className="px-3 text-xs text-zinc-500">{t("nav.version")}</div>
       </div>
     </aside>
   );

@@ -1,105 +1,154 @@
 """
-TTS provider adapter. Same pattern as the LLM adapter:
-  - abstract interface
-  - one concrete provider per backend
-  - graceful degradation (raise on failure, caller falls back or logs)
+TTS provider adapter.
+
+Each adapter writes an audio file to disk and returns (path, duration_ms).
+Base64 audio is not used — files are simpler, cacheable, and OBS can play them
+via the frontend's <audio> element directly.
 """
 
-import asyncio
 import os
-import time
+import subprocess
+import tempfile
 from abc import ABC, abstractmethod
 from pathlib import Path
+
+
+MEDIA_ROOT = Path(os.getenv("MEDIA_ROOT", "media/tts"))
+MEDIA_ROOT.mkdir(parents=True, exist_ok=True)
 
 
 class TTSProvider(ABC):
     name: str = "base"
 
     @abstractmethod
-    async def synthesize(self, text: str, *, voice: str, language: str, out_path: Path) -> None:
-        """Write a playable audio file to out_path. Raise on failure."""
+    def synthesize(self, text: str, *, voice: str, language: str) -> tuple[Path, int]:
+        """Return (audio_file_path, duration_ms)."""
 
 
-# --- Edge TTS (default, no key required) ---
+class AzureTTS(TTSProvider):
+    name = "azure"
 
-class EdgeTTSProvider(TTSProvider):
-    name = "tts:edge"
+    def synthesize(self, text: str, *, voice: str, language: str) -> tuple[Path, int]:
+        import azure.cognitiveservices.speech as speechsdk
 
-    async def synthesize(self, text: str, *, voice: str, language: str, out_path: Path) -> None:
-        import edge_tts
+        key = os.getenv("AZURE_SPEECH_KEY")
+        region = os.getenv("AZURE_SPEECH_REGION", "westeurope")
+        if not key:
+            raise RuntimeError("AZURE_SPEECH_KEY not set")
 
-        # Map our internal voice names to edge-tts voice IDs.
-        # edge-tts voices follow: {locale}-{Name}Neural
-        edge_voice = _resolve_edge_voice(voice, language)
+        voice = voice or os.getenv("AZURE_SPEECH_VOICE", "en-US-JennyNeural")
 
-        communicate = edge_tts.Communicate(text=text, voice=edge_voice)
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        await communicate.save(str(out_path))
-        self.name = f"tts:edge:{edge_voice}"
+        out_path = MEDIA_ROOT / f"{_slug(text)}.mp3"
+        speech_config = speechsdk.SpeechConfig(subscription=key, region=region)
+        speech_config.speech_synthesis_voice_name = voice
+        speech_config.set_speech_synthesis_output_format(
+            speechsdk.SpeechSynthesisOutputFormat.Audio24Khz96KBitRateMonoMp3
+        )
+        audio_config = speechsdk.audio.AudioOutputConfig(filename=str(out_path))
+        synthesizer = speechsdk.SpeechSynthesizer(
+            speech_config=speech_config, audio_config=audio_config
+        )
+        result = synthesizer.speak_text_async(text).get()
+        if result.reason != speechsdk.ResultReason.SynthesizingAudioCompleted:
+            raise RuntimeError(f"Azure TTS failed: {result.reason}")
+
+        # Azure doesn't report duration; estimate from mp3 bitrate (96kbps mono)
+        size = out_path.stat().st_size
+        duration_ms = int((size * 8) / 96)  # 96 kbps → bytes*8/96000*1000
+        return out_path, duration_ms
 
 
-# --- ElevenLabs (production-quality, requires key) ---
+class ElevenLabsTTS(TTSProvider):
+    name = "elevenlabs"
 
-class ElevenLabsTTSProvider(TTSProvider):
-    name = "tts:elevenlabs"
+    def synthesize(self, text: str, *, voice: str, language: str) -> tuple[Path, int]:
+        import requests
 
-    def __init__(self, voice_id: str | None = None):
-        self.api_key = os.getenv("ELEVENLABS_API_KEY")
-        self.voice_id = voice_id or os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")
-        if not self.api_key:
+        key = os.getenv("ELEVENLABS_API_KEY")
+        if not key:
             raise RuntimeError("ELEVENLABS_API_KEY not set")
+        voice_id = voice or os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")
 
-    async def synthesize(self, text: str, *, voice: str, language: str, out_path: Path) -> None:
-        import httpx
+        r = requests.post(
+            f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
+            headers={"xi-api-key": key, "Content-Type": "application/json"},
+            json={"text": text, "model_id": "eleven_turbo_v2"},
+            timeout=30,
+        )
+        if not r.ok:
+            raise RuntimeError(f"ElevenLabs {r.status_code}: {r.text[:200]}")
 
-        url = f"https://api.elevenlabs.io/v1/text-to-speech/{self.voice_id}"
-        headers = {
-            "xi-api-key": self.api_key,
-            "Content-Type": "application/json",
-        }
-        body = {
-            "text": text,
-            "model_id": "eleven_turbo_v2_5",
-            "voice_settings": {"stability": 0.5, "similarity_boost": 0.75},
-        }
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            resp = await client.post(url, headers=headers, json=body)
-            resp.raise_for_status()
-            out_path.parent.mkdir(parents=True, exist_ok=True)
-            out_path.write_bytes(resp.content)
-        self.name = f"tts:elevenlabs:{self.voice_id}"
+        out_path = MEDIA_ROOT / f"{_slug(text)}.mp3"
+        out_path.write_bytes(r.content)
+
+        # Rough estimate: 150 wpm average
+        words = len(text.split())
+        duration_ms = int((words / 150) * 60 * 1000)
+        return out_path, duration_ms
 
 
-# --- helpers ---
+class PiperTTS(TTSProvider):
+    name = "piper"
 
-_EDGE_VOICE_MAP = {
-    # Our internal voice names → edge-tts voice IDs
-    "en-US-Neural-A": "en-US-AriaNeural",
-    "en-US-Neural-B": "en-US-GuyNeural",
-    "en-GB-Neural-A": "en-GB-SoniaNeural",
-    "en-GB-Neural-B": "en-GB-RyanNeural",
-}
+    def synthesize(self, text: str, *, voice: str, language: str) -> tuple[Path, int]:
+        voice_path = voice or os.getenv("PIPER_VOICE", "voices/en_US-lessac-medium.onnx")
+        out_path = MEDIA_ROOT / f"{_slug(text)}.wav"
 
-_LANG_DEFAULT_VOICE = {
-    "en": "en-US-AriaNeural",
-    "es": "es-ES-ElviraNeural",
-    "pt": "pt-BR-FranciscaNeural",
-    "fr": "fr-FR-DeniseNeural",
-}
+        # Piper reads text from stdin, writes wav to stdout
+        process = subprocess.run(
+            ["piper", "--model", voice_path, "--output_file", str(out_path)],
+            input=text.encode("utf-8"),
+            capture_output=True,
+            timeout=30,
+        )
+        if process.returncode != 0:
+            raise RuntimeError(f"piper failed: {process.stderr.decode()[:200]}")
+
+        # Estimate duration from wav header
+        import wave
+        with wave.open(str(out_path), "rb") as w:
+            frames = w.getnframes()
+            rate = w.getframerate()
+            duration_ms = int((frames / rate) * 1000)
+        return out_path, duration_ms
 
 
-def _resolve_edge_voice(voice: str, language: str) -> str:
-    if voice in _EDGE_VOICE_MAP:
-        return _EDGE_VOICE_MAP[voice]
-    return _LANG_DEFAULT_VOICE.get(language, "en-US-AriaNeural")
+def _slug(text: str) -> str:
+    import hashlib
+    return hashlib.sha256(text.encode()).hexdigest()[:16]
 
 
-def get_tts_provider() -> TTSProvider:
-    """Select the TTS provider based on TTS_PROVIDER env var."""
-    provider = os.getenv("TTS_PROVIDER", "edge").lower()
-    if provider == "elevenlabs":
-        try:
-            return ElevenLabsTTSProvider()
-        except Exception:
-            return EdgeTTSProvider()
-    return EdgeTTSProvider()
+def get_provider() -> TTSProvider:
+    name = os.getenv("TTS_PROVIDER", "").lower()
+    if name == "azure":
+        return AzureTTS()
+    if name == "elevenlabs":
+        return ElevenLabsTTS()
+    if name == "piper":
+        return PiperTTS()
+    if name == "edge":
+        return EdgeTTS()
+    raise RuntimeError(f"Unknown TTS_PROVIDER: {name!r}")
+
+
+class EdgeTTS(TTSProvider):
+    name = "edge"
+
+    def synthesize(self, text: str, *, voice: str, language: str) -> tuple[Path, int]:
+        import subprocess
+
+        voice_name = voice or "en-US-JennyNeural"
+        out_path = MEDIA_ROOT / f"{_slug(text)}.mp3"
+
+        result = subprocess.run(
+            ["edge-tts", "--voice", voice_name, "--text", text, "--write-media", str(out_path)],
+            capture_output=True,
+            timeout=30,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"edge-tts failed: {result.stderr.decode()[:200]}")
+
+        words = len(text.split())
+        duration_ms = int((words / 150) * 60 * 1000)
+        return out_path, duration_ms
+    

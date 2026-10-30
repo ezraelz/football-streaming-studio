@@ -6,11 +6,13 @@ import type { usePendingSuggestions } from "@/lib/hooks/use-pending-suggestions"
 import { Alert, EmptyState } from "@/components/ui/feedback";
 import { buttonClass } from "@/components/ui/button";
 import { SuggestionCard } from "./suggestion-card";
+import { useT } from "@/lib/i18n";
 
 type Suggestions = ReturnType<typeof usePendingSuggestions>;
 
 export function SuggestionFeed({ suggestions }: { suggestions: Suggestions }) {
   const params = useParams<{ sessionId: string }>();
+  const t = useT();
   const { items, busyId, error, dismissError, approve, skip, regenerate } = suggestions;
 
   return (
@@ -20,11 +22,11 @@ export function SuggestionFeed({ suggestions }: { suggestions: Suggestions }) {
       {items.length === 0 ? (
         <EmptyState
           icon={<Sparkles className="h-6 w-6" />}
-          title="No suggestions waiting"
-          description="New AI lines appear here the moment an event happens."
+          title={t("sugg.emptyTitle")}
+          description={t("sugg.emptyBody")}
           action={
             <Link href={`/studio/${params.sessionId}/commentary`} className={buttonClass("secondary", "sm")}>
-              Open commentary desk
+              {t("sugg.openDesk")}
             </Link>
           }
         />

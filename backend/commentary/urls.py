@@ -9,4 +9,7 @@ urlpatterns = [
     
     path("commentary/<uuid:item_id>/speak", views.speak),
     path("commentary/<uuid:item_id>/played", views.mark_played),
+    
+    path("speech/<uuid:job_id>/audio", views.serve_speech),
+    path("speech/<uuid:job_id>/played", views.mark_speech_played),
 ]

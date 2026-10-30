@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState, type ReactNode } from "react";
-import { Check, Copy, KeyRound, Radio, RefreshCw, Server, ShieldCheck, Volume2 } from "lucide-react";
+import { Check, Copy, KeyRound, Palette, Radio, RefreshCw, Server, ShieldCheck, Volume2 } from "lucide-react";
 import { useShowStore } from "@/lib/stores/show-store";
 import { api } from "@/lib/api/client";
 import { cn } from "@/lib/utility/utils";
@@ -8,25 +8,32 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Panel } from "@/components/ui/panel";
 import { Alert } from "@/components/ui/feedback";
 import { Button } from "@/components/ui/button";
-import { Field, inputClass } from "@/components/ui/form";
+import { Field, Segmented, Switch, inputClass } from "@/components/ui/form";
+import { useI18n, useT, type MsgKey } from "@/lib/i18n";
+import { LanguageSwitch, ThemeSwitch } from "@/components/ui/prefs";
+import {
+  ethCalendarPref, ethClockPref, overlayLangPref, overlayLitePref, overlayToneOverlayPref,
+} from "@/lib/prefs";
 
-const SECTIONS = [
-  { id: "backend", label: "Backend" },
-  { id: "provider", label: "Data provider" },
-  { id: "overlay", label: "Overlay for OBS" },
-  { id: "obs", label: "OBS connection" },
-  { id: "audio", label: "Audio routing" },
+const SECTIONS: { id: string; label: MsgKey }[] = [
+  { id: "appearance", label: "set.s.appearance" },
+  { id: "backend", label: "set.s.backend" },
+  { id: "provider", label: "set.s.provider" },
+  { id: "overlay", label: "set.s.overlay" },
+  { id: "obs", label: "set.s.obs" },
+  { id: "audio", label: "set.s.audio" },
 ];
 
 export default function SettingsPage() {
+  const t = useT();
   const { settings, updateSettings, overlayToken, session } = useShowStore();
 
   return (
     <div className="mx-auto max-w-5xl">
-      <PageHeader title="Settings" description="Connections, overlay access and OBS integration." />
+      <PageHeader title={t("set.title")} description={t("set.description")} />
 
       <div className="mt-6 grid gap-8 lg:grid-cols-[180px_minmax(0,1fr)]">
-        <nav aria-label="Settings sections" className="hidden lg:block">
+        <nav aria-label={t("set.sections")} className="hidden lg:block">
           <ul className="sticky top-0 space-y-0.5">
             {SECTIONS.map((s) => (
               <li key={s.id}>
@@ -34,7 +41,7 @@ export default function SettingsPage() {
                   href={`#${s.id}`}
                   className="block rounded-lg px-3 py-1.5 text-sm text-zinc-400 transition-colors hover:bg-zinc-800/60 hover:text-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
                 >
-                  {s.label}
+                  {t(s.label)}
                 </a>
               </li>
             ))}
@@ -42,6 +49,7 @@ export default function SettingsPage() {
         </nav>
 
         <div className="flex flex-col gap-6">
+          <AppearanceSection />
           <BackendSection apiBase={settings.apiBase} onChange={(apiBase) => updateSettings({ apiBase })} />
           <ProviderSection
             name={settings.providerName}
@@ -72,16 +80,47 @@ function Section({
   );
 }
 
-function BackendSection({ apiBase, onChange }: { apiBase: string; onChange: (v: string) => void }) {
+function AppearanceSection() {
+  const t = useT();
+  const ethCalendar = ethCalendarPref.useValue();
+  const ethClock = ethClockPref.useValue();
   return (
-    <Section id="backend" icon={<Server className="h-4 w-4" />} title="Backend API"
-      hint="Where the app sends control and data requests. Point this at your Django host once it's deployed.">
-      <Field label="API base URL" htmlFor="api-base">
+    <Section id="appearance" icon={<Palette className="h-4 w-4" />} title={t("set.s.appearance")} hint={t("set.appearance.hint")}>
+      <div className="flex flex-col gap-5">
+        <div className="flex flex-wrap items-center gap-x-8 gap-y-4">
+          <Field label={t("prefs.language")}><LanguageSwitch /></Field>
+          <Field label={t("prefs.theme")}><ThemeSwitch showLabels /></Field>
+        </div>
+        <ToggleRow label={t("set.appearance.ethCalendar")} hint={t("set.appearance.ethCalendarHint")} checked={ethCalendar} onChange={ethCalendarPref.set} />
+        <ToggleRow label={t("set.appearance.ethClock")} hint={t("set.appearance.ethClockHint")} checked={ethClock} onChange={ethClockPref.set} />
+      </div>
+    </Section>
+  );
+}
+
+function ToggleRow({ label, hint, checked, onChange }: { label: string; hint: string; checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <div className="flex items-start justify-between gap-4">
+      <div className="min-w-0">
+        <div className="text-sm font-medium text-zinc-200">{label}</div>
+        <p className="mt-0.5 text-xs text-zinc-400">{hint}</p>
+      </div>
+      <Switch checked={checked} onChange={onChange} label={label} />
+    </div>
+  );
+}
+
+function BackendSection({ apiBase, onChange }: { apiBase: string; onChange: (v: string) => void }) {
+  const t = useT();
+  return (
+    <Section id="backend" icon={<Server className="h-4 w-4" />} title={t("set.backend.title")}
+      hint={t("set.backend.hint")}>
+      <Field label={t("set.backend.url")} htmlFor="api-base">
         <input id="api-base" value={apiBase} onChange={(e) => onChange(e.target.value)} className={cn(inputClass, "font-mono")} />
       </Field>
       <p className="mt-3 flex items-center gap-2 text-xs text-zinc-400">
         <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" aria-hidden />
-        Using in-memory mock data until Django is wired.
+        {t("set.backend.mock")}
       </p>
     </Section>
   );
@@ -94,14 +133,15 @@ function ProviderSection({
   staleThreshold: number;
   onChange: (patch: { providerName?: string; staleThresholdSeconds?: number }) => void;
 }) {
+  const t = useT();
   return (
-    <Section id="provider" icon={<Radio className="h-4 w-4" />} title="Football data provider"
-      hint="Where live scores and events come from.">
+    <Section id="provider" icon={<Radio className="h-4 w-4" />} title={t("set.provider.title")}
+      hint={t("set.provider.hint")}>
       <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="Provider" htmlFor="provider-name">
+        <Field label={t("set.provider.name")} htmlFor="provider-name">
           <input id="provider-name" value={name} onChange={(e) => onChange({ providerName: e.target.value })} className={inputClass} />
         </Field>
-        <Field label="Treat data as stale after" htmlFor="stale" hint="Seconds without an update. Time-sensitive commentary pauses when data goes stale.">
+        <Field label={t("set.provider.stale")} htmlFor="stale" hint={t("set.provider.staleHint")}>
           <input
             id="stale"
             type="number"
@@ -114,7 +154,7 @@ function ProviderSection({
       </div>
       <Alert tone="warn" className="mt-4">
         <span className="flex items-center gap-1.5"><ShieldCheck className="h-3.5 w-3.5 shrink-0" aria-hidden />
-        Provider keys are configured on the Django server, never in this app.</span>
+        {t("set.provider.keys")}</span>
       </Alert>
     </Section>
   );
@@ -123,6 +163,7 @@ function ProviderSection({
 function CopyField({
   label, id, value, disabled, extra,
 }: { label: string; id: string; value: string; disabled?: boolean; extra?: ReactNode }) {
+  const t = useT();
   const [copied, setCopied] = useState(false);
   const copy = async () => {
     try {
@@ -137,26 +178,34 @@ function CopyField({
         <input id={id} readOnly value={value} onFocus={(e) => e.currentTarget.select()} className={cn(inputClass, "font-mono text-xs")} />
         <Button onClick={copy} disabled={disabled} className="w-24">
           {copied ? <Check className="h-4 w-4 text-emerald-400" aria-hidden /> : <Copy className="h-4 w-4" aria-hidden />}
-          {copied ? "Copied" : "Copy"}
+          {copied ? t("common.copied") : t("common.copy")}
         </Button>
         {extra}
       </div>
-      <span className="sr-only" aria-live="polite">{copied ? `${label} copied` : ""}</span>
+      <span className="sr-only" aria-live="polite">{copied ? `${label} · ${t("common.copied")}` : ""}</span>
     </Field>
   );
 }
 
 function OverlaySection({ token, sessionId }: { token: string | null; sessionId: string }) {
+  const t = useT();
+  const { lang: studioLang } = useI18n();
   const { session } = useShowStore();
+  const overlayLang = overlayLangPref.useValue();
+  const tone = overlayToneOverlayPref.useValue();
+  const lite = overlayLitePref.useValue();
   const [rotating, setRotating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const base = typeof window !== "undefined" ? window.location.origin : "http://localhost:3000";
   // One URL, no `scene=`: this source shows the scene, the graphics and the ticker, and follows
   // scene changes made in the studio. (`?scene=<key>` still works to pin a source to one scene.)
+  // lang / tone / lite are baked into the URL because OBS has its own browser storage.
+  const lang = overlayLang === "follow" ? studioLang : overlayLang;
+  const look = `lang=${lang}&tone=${tone}${lite ? "&lite=1" : ""}`;
   const overlayUrl = token
-    ? `${base}/overlay/${sessionId}?token=${token}`
-    : `${base}/overlay/${sessionId}`;
+    ? `${base}/overlay/${sessionId}?token=${token}&${look}`
+    : `${base}/overlay/${sessionId}?${look}`;
 
   const rotate = async () => {
     if (!session) return;
@@ -166,33 +215,61 @@ function OverlaySection({ token, sessionId }: { token: string | null; sessionId:
       const updated = await api.rotateToken(session.id);
       useShowStore.setState({ session: updated, overlayToken: updated.overlay_token });
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Couldn't rotate the token.");
+      setError(e instanceof Error ? e.message : t("set.overlay.rotateErr"));
     } finally {
       setRotating(false);
     }
   };
 
   return (
-    <Section id="overlay" icon={<KeyRound className="h-4 w-4" />} title="Overlay for OBS"
-      hint="Add ONE Browser Source (1920×1080) with this URL, full-frame, above your video. It renders the scene, graphics cards and ticker together — the same picture as the studio preview. The link contains a secret token; don't share it.">
+    <Section id="overlay" icon={<KeyRound className="h-4 w-4" />} title={t("set.overlay.title")}
+      hint={t("set.overlay.hint")}>
       <div className="flex flex-col gap-4">
-        <CopyField label="Overlay URL" id="overlay-url" value={overlayUrl} />
+        <div className="grid gap-4 rounded-lg border border-zinc-800 bg-zinc-950/40 p-3 sm:grid-cols-2">
+          <Field label={t("set.overlay.lang")}>
+            <Segmented
+              label={t("set.overlay.lang")}
+              value={overlayLang}
+              onChange={overlayLangPref.set}
+              options={[
+                { value: "follow", label: t("set.overlay.lang.follow") },
+                { value: "en", label: "English" },
+                { value: "am", label: "አማርኛ" },
+              ]}
+            />
+          </Field>
+          <Field label={t("set.overlay.tone")}>
+            <Segmented
+              label={t("set.overlay.tone")}
+              value={tone}
+              onChange={overlayToneOverlayPref.set}
+              options={[
+                { value: "dark", label: t("set.overlay.tone.dark") },
+                { value: "light", label: t("set.overlay.tone.light") },
+              ]}
+            />
+          </Field>
+          <div className="sm:col-span-2">
+            <ToggleRow label={t("set.overlay.lite")} hint={t("set.overlay.liteHint")} checked={lite} onChange={overlayLitePref.set} />
+          </div>
+        </div>
+        <CopyField label={t("set.overlay.url")} id="overlay-url" value={overlayUrl} />
         <CopyField
-          label="Session token"
+          label={t("set.overlay.token")}
           id="overlay-token"
-          value={token ?? "No active session"}
+          value={token ?? t("set.overlay.noSession")}
           disabled={!token}
           extra={
-            <Button onClick={rotate} disabled={!token || !session} loading={rotating} title="Invalidates the old URL">
-              {!rotating && <RefreshCw className="h-4 w-4" aria-hidden />} Rotate
+            <Button onClick={rotate} disabled={!token || !session} loading={rotating} title={t("set.overlay.rotateHint")}>
+              {!rotating && <RefreshCw className="h-4 w-4" aria-hidden />} {t("set.overlay.rotate")}
             </Button>
           }
         />
         {error && <Alert tone="error" onDismiss={() => setError(null)}>{error}</Alert>}
         <ul className="space-y-1 text-xs text-zinc-400">
-          <li>Scene changes, graphics and the ticker all arrive through this one page — you don&apos;t need a Browser Source per scene.</li>
-          <li>Tip: in the source&apos;s properties, leave &ldquo;Shutdown source when not visible&rdquo; off so it keeps its state.</li>
-          <li>Overlays are read-only and limited to one show. Rotating the token breaks the old URL, so update OBS afterwards.</li>
+          <li>{t("set.overlay.tip1")}</li>
+          <li>{t("set.overlay.tip2")}</li>
+          <li>{t("set.overlay.tip3")}</li>
         </ul>
       </div>
     </Section>
@@ -200,6 +277,7 @@ function OverlaySection({ token, sessionId }: { token: string | null; sessionId:
 }
 
 export function ObsSection() {
+  const t = useT();
   const [status, setStatus] = useState<{ connected: boolean; current_scene: string | null } | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -220,37 +298,38 @@ export function ObsSection() {
   };
 
   return (
-    <Section id="obs" icon={<Radio className="h-4 w-4" />} title="OBS connection"
-      hint="Optional. When connected, scene changes here are pushed to OBS automatically.">
+    <Section id="obs" icon={<Radio className="h-4 w-4" />} title={t("set.obs.title")}
+      hint={t("set.obs.hint")}>
       <div className="flex items-center justify-between gap-3 rounded-lg border border-zinc-800 bg-zinc-950/50 p-3">
         <div className="flex items-center gap-2.5 text-sm" role="status">
           <span className={cn("h-2.5 w-2.5 rounded-full", status?.connected ? "bg-emerald-400" : "bg-zinc-600")} aria-hidden />
-          {status === null ? "Checking…"
-            : status.connected ? `Connected${status.current_scene ? ` · on “${status.current_scene}”` : ""}`
-            : "Not connected"}
+          {status === null ? t("common.checking")
+            : status.connected ? `${t("set.obs.connected")}${status.current_scene ? t("set.obs.onScene", { scene: status.current_scene }) : ""}`
+            : t("set.obs.notConnected")}
         </div>
         
         <Button onClick={reconnect} loading={busy}>
-          {!busy && <RefreshCw className="h-4 w-4" aria-hidden />} Reconnect
+          {!busy && <RefreshCw className="h-4 w-4" aria-hidden />} {t("set.obs.reconnect")}
         </Button>
       </div>
       <ul className="mt-3 space-y-1 text-xs text-zinc-400">
-        <li>Enable the WebSocket server in <strong className="text-zinc-200">OBS → Tools → WebSocket Server Settings</strong>.</li>
-        <li>If disconnected, the app still works — scene changes just stay local.</li>
+        <li>{t("set.obs.tip1", { path: t("set.obs.path") })}</li>
+        <li>{t("set.obs.tip2")}</li>
       </ul>
     </Section>
   );
 }
 
 function AudioSection() {
+  const t = useT();
   const steps: ReactNode[] = [
-    <>Add a <strong>Microphone</strong> source for the presenter.</>,
-    <>Add an <strong>Application Audio</strong> capture routed to this app for AI voice playback.</>,
-    <>Turn on <strong>Monitor and Output</strong> for the voice source so you can hear it without a second device.</>,
+    <>{t("set.audio.s1a")}<strong>{t("set.audio.s1b")}</strong>{t("set.audio.s1c")}</>,
+    <>{t("set.audio.s2a")}<strong>{t("set.audio.s2b")}</strong>{t("set.audio.s2c")}</>,
+    <>{t("set.audio.s3a")}<strong>{t("set.audio.s3b")}</strong>{t("set.audio.s3c")}</>,
   ];
   return (
-    <Section id="audio" icon={<Volume2 className="h-4 w-4" />} title="Audio routing"
-      hint="Presenter mic and AI voice must be separate audio sources in OBS.">
+    <Section id="audio" icon={<Volume2 className="h-4 w-4" />} title={t("set.audio.title")}
+      hint={t("set.audio.hint")}>
       <ol className="space-y-3">
         {steps.map((s, i) => (
           <li key={i} className="flex gap-3 text-sm text-zinc-200">

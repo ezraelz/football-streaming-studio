@@ -10,6 +10,8 @@ import { LEAGUE_THEMES, DEFAULT_THEME } from "@/lib/branding/leagues";
 import { mockEditorialCards } from "@/lib/mock/editorial-cards";
 import { mockSnapshot } from "@/lib/mock/fixtures";
 import type { EditorialCard } from "@/lib/api/client";
+import { I18nProvider, type Lang } from "@/lib/i18n";
+import type { OverlayTone } from "@/lib/prefs";
 
 type Setup = Record<string, Zone | "auto">; // card id → position (only cards that are on air)
 
@@ -27,6 +29,9 @@ export function DemoContent() {
   const [guides, setGuides] = useState(false);
   const [commentary, setCommentary] = useState(false);
   const [league, setLeague] = useState("Premier League");
+  const [lang, setLang] = useState<Lang>("en");
+  const [tone, setTone] = useState<OverlayTone>("dark");
+  const [lite, setLite] = useState(false);
 
   const cards: EditorialCard[] = mockEditorialCards
     .filter((c) => c.id in setup)
@@ -46,8 +51,9 @@ export function DemoContent() {
   const snapshot = { ...mockSnapshot, freshness: "fresh" as const };
 
   return (
+    <I18nProvider lang={lang}>
     <div className="fixed inset-0 bg-[radial-gradient(ellipse_at_center,#14532d_0%,#052e16_55%,#022c22_100%)]">
-      <OverlayCanvas preview>
+      <OverlayCanvas preview tone={tone} lite={lite}>
         <ScoreboardScene snapshot={snapshot} />
         <EditorialLayer
           cards={cards}
@@ -109,9 +115,15 @@ export function DemoContent() {
           })}
         </ul>
 
+        <div className="flex items-center gap-2">
+          <button onClick={() => setLang(lang === "en" ? "am" : "en")} className="rounded-md bg-white/10 px-2 py-1 hover:bg-white/20">{lang === "en" ? "አማርኛ" : "English"}</button>
+          <button onClick={() => setTone(tone === "dark" ? "light" : "dark")} className="rounded-md bg-white/10 px-2 py-1 hover:bg-white/20">{tone === "dark" ? "Light cards" : "Dark cards"}</button>
+        </div>
+        <label className="flex items-center gap-2"><input type="checkbox" checked={lite} onChange={(e) => setLite(e.target.checked)} /> Lite mode</label>
         <label className="flex items-center gap-2"><input type="checkbox" checked={guides} onChange={(e) => setGuides(e.target.checked)} /> Show screen outlines</label>
         <label className="flex items-center gap-2"><input type="checkbox" checked={commentary} onChange={(e) => setCommentary(e.target.checked)} /> Show live commentary bar</label>
       </div>
     </div>
+    </I18nProvider>
   );
 }

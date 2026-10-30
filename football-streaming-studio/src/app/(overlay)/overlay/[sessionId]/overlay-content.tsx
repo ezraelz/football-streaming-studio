@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { useSocket } from "@/lib/hooks/use-socket";
-import { api, OverlayState, EditorialCard } from "@/lib/api/client";
+import { api, OverlayState, EditorialCard, Incident } from "@/lib/api/client";
 import { OverlayCanvas } from "@/components/overlay/canvas";
 import { ScoreboardScene } from "@/components/overlay/scenes/scoreboard";
 import { TimelineScene } from "@/components/overlay/scenes/timeline";
@@ -10,6 +10,8 @@ import { TacticalScene } from "@/components/overlay/scenes/tactical";
 import { PlayerScene } from "@/components/overlay/scenes/player";
 import { LowerThirdScene } from "@/components/overlay/scenes/lower-third";
 import { EditorialLayer, applyEditorialUpdate, lowerThirdLift } from "@/components/overlay/scenes/editorial";
+import { I18nProvider, useT, type Lang } from "@/lib/i18n";
+import type { OverlayTone } from "@/lib/prefs";
 import type { MatchSnapshot, MatchEvent, DataFreshness } from "@/lib/types/types";
 
 export type OverlaySceneKey =
@@ -24,20 +26,43 @@ function normalizeScene(s: string | null): OverlaySceneKey {
   return "scoreboard";
 }
 
+/**
+ * OBS / preview entry point.
+ * URL options:  ?token=…  [&lang=am|en]  [&tone=dark|light]  [&lite=1]  [&scene=…]  [&preview=1]
+ */
 export function OverlayContent() {
+  const [lang, setLang] = useState<Lang | undefined>(undefined);
+  useEffect(() => {
+    const l = new URLSearchParams(window.location.search).get("lang");
+    if (l === "am" || l === "en") setLang(l);
+  }, []);
+  return (
+    <I18nProvider lang={lang}>
+      <OverlayStage />
+    </I18nProvider>
+  );
+}
+
+function OverlayStage() {
+  const t = useT();
   const [params, setParams] = useState<{
     scene: string | null;
     token: string | null;
     isPreview: boolean;
+    tone: OverlayTone;
+    lite: boolean;
+    compact: boolean;
     /** Follow the studio's scene changes. On when the URL has no `scene=` (one OBS source does everything). */
     follow: boolean;
-  }>({ scene: null, token: null, isPreview: false, follow: true });
+  }>({ scene: null, token: null, isPreview: false, tone: "dark", lite: false, compact: false, follow: true });
 
   const [hydrated, setHydrated] = useState(false);
   const [data, setData] = useState<OverlayState | null>(null);
   const [wsConnected, setWsConnected] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [sceneOverride, setSceneOverride] = useState<string | null>(null);
+  const [incidents, setIncidents] = useState<Incident[]>([]);
+  const compactMode = params.compact;
   // Every card currently on air. Several can be visible at once; the layer arranges them.
   const [editorialCards, setEditorialCards] = useState<EditorialCard[]>([]);
   const fetchedRef = useRef(false);
@@ -58,6 +83,9 @@ export function OverlayContent() {
       scene: sp.get("scene"),
       token: sp.get("token"),
       isPreview: sp.get("preview") === "1",
+      tone: sp.get("tone") === "light" ? "light" : "dark",
+      lite: sp.get("lite") === "1",
+      compact: sp.get("compact") === "1",
       // `?scene=x` alone pins a source to that scene (legacy, one OBS source per scene).
       follow: !sp.get("scene") || sp.get("follow") === "1" || sp.get("preview") === "1",
     });
@@ -93,6 +121,22 @@ export function OverlayContent() {
       });
     return () => { cancelled = true; };
   }, [hydrated, params.token]);
+
+  // Fetch incidents once match_id is known, then poll every 30s
+  useEffect(() => {
+    if (!data?.match_id) return;
+    let cancelled = false;
+
+    const fetchIncidents = () => {
+      api.incidents(data.match_id)
+        .then((r) => { if (!cancelled) setIncidents(r.incidents); })
+        .catch(() => { /* keep previous */ });
+    };
+
+    fetchIncidents();
+    const id = setInterval(fetchIncidents, 30_000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [data?.match_id]);
 
   // Safety net: OBS reloads sources and websockets drop. Re-sync scene + cards every 5s
   // (only if the backend includes them in the overlay state).
@@ -180,17 +224,17 @@ export function OverlayContent() {
 
   if (!hydrated) {
     return (
-      <OverlayCanvas preview={false}>
-        <div className="flex h-full items-center justify-center text-white/40">Connecting…</div>
+      <OverlayCanvas preview={false} tone={params.tone} lite={params.lite}>
+        <div className="flex h-full items-center justify-center text-[36px] text-white/40">{t("ov.connecting")}</div>
       </OverlayCanvas>
     );
   }
 
   if (!data && !fetchError) {
     return (
-      <OverlayCanvas preview={params.isPreview}>
-        <div className="flex h-full items-center justify-center text-white/40">
-          Connecting… {params.token ? "(token ok)" : "(no token in URL)"}
+      <OverlayCanvas preview={params.isPreview} tone={params.tone} lite={params.lite}>
+        <div className="flex h-full items-center justify-center text-[36px] text-white/40">
+          {t("ov.connecting")} {params.token ? t("ov.tokenOk") : t("ov.noToken")}
         </div>
       </OverlayCanvas>
     );
@@ -198,9 +242,9 @@ export function OverlayContent() {
 
   if (!data && fetchError) {
     return (
-      <OverlayCanvas preview={params.isPreview}>
-        <div className="flex h-full items-center justify-center text-sm text-red-400/80">
-          Overlay unavailable: {fetchError}
+      <OverlayCanvas preview={params.isPreview} tone={params.tone} lite={params.lite}>
+        <div className="flex h-full items-center justify-center text-[32px] text-red-400/80">
+          {t("ov.unavailable", { error: fetchError ?? "" })}
         </div>
       </OverlayCanvas>
     );
@@ -255,12 +299,36 @@ export function OverlayContent() {
   }));
 
   return (
-    <OverlayCanvas preview={params.isPreview}>
+    <OverlayCanvas preview={params.isPreview} tone={params.tone} lite={params.lite}>
+      {/* The scoreboard stays on screen in every scene except the full-width ones that replace it. */}
       {sceneKey === "scoreboard" && <ScoreboardScene snapshot={snapshot} />}
-      {sceneKey === "timeline" && <TimelineScene events={events} />}
+      {sceneKey === "timeline" && (
+        <TimelineScene
+          incidents={incidents}
+          home={{
+            id: live.home.id,
+            name: live.home.name,
+            shortName: live.home.shortName,
+            color: live.home.color,
+          }}
+          away={{
+            id: live.away.id,
+            name: live.away.name,
+            shortName: live.away.shortName,
+            color: live.away.color,
+          }}
+        />
+      )}
       {sceneKey === "stats" && <StatsScene snapshot={snapshot} />}
-      {sceneKey === "tactical" && <TacticalScene snapshot={snapshot} />}
-      {sceneKey === "player" && <PlayerScene events={events} />}
+      {sceneKey === "tactical" && (
+        <TacticalScene
+          snapshot={snapshot}
+          lineups={live.lineups}
+          showNames={!compactMode}
+          showNumbers={!compactMode}
+        />
+      )}
+      {sceneKey === "player" && <PlayerScene events={events} snapshot={snapshot} />}
       {sceneKey === "lower-third" && (
         <LowerThirdScene
           text={live.active_commentary?.text}

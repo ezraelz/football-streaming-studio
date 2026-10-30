@@ -13,21 +13,18 @@ import { Badge } from "@/components/ui/badge";
 import { Alert, EmptyState, Skeleton } from "@/components/ui/feedback";
 import { PageHeader } from "@/components/ui/page-header";
 import { inputClass } from "@/components/ui/form";
+import { useT, type TFn } from "@/lib/i18n";
+import { useFormat } from "@/lib/i18n/use-format";
+import { TeamCrest } from "@/components/overlay/crest";
 
 /* ---------- config & types ---------- */
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 
 type Filter = "all" | "live" | "today";
 type CommentaryMode = ReturnType<typeof useShowStore.getState>["commentaryMode"];
 
 const DEFAULT_MODE = "approval" as unknown as CommentaryMode;
 const STATUS_ORDER: Record<string, number> = { live: 0, scheduled: 1, ft: 2 };
-const FILTERS: { id: Filter; label: string }[] = [
-  { id: "all", label: "All" },
-  { id: "live", label: "Live" },
-  { id: "today", label: "Today" },
-];
+const FILTERS: Filter[] = ["all", "live", "today"];
 
 /* ---------- helpers ---------- */
 
@@ -35,22 +32,10 @@ function isToday(iso: string) {
   return new Date(iso).toDateString() === new Date().toDateString();
 }
 
-function dayLabel(iso: string) {
-  const d = new Date(iso);
-  const tomorrow = new Date();
-  tomorrow.setDate(tomorrow.getDate() + 1);
-  if (isToday(iso)) return "Today";
-  if (d.toDateString() === tomorrow.toDateString()) return "Tomorrow";
-  return d.toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" });
-}
-
-function formatTime(iso: string) {
-  return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
 
 type DayGroup = { key: string; label: string; competitions: { name: string; fixtures: Fixture[] }[] };
 
-function groupFixtures(fixtures: Fixture[]): DayGroup[] {
+function groupFixtures(fixtures: Fixture[], dayLabel: (iso: string) => string, other: string): DayGroup[] {
   const sorted = fixtures.slice().sort((a, b) => {
     const da = new Date(a.kickoff);
     const db = new Date(b.kickoff);
@@ -63,7 +48,7 @@ function groupFixtures(fixtures: Fixture[]): DayGroup[] {
   const days = new Map<string, DayGroup>();
   for (const f of sorted) {
     const key = new Date(f.kickoff).toDateString();
-    const name = f.competition || "Other fixtures";
+    const name = f.competition || other;
     let day = days.get(key);
     if (!day) {
       day = { key, label: dayLabel(f.kickoff), competitions: [] };
@@ -82,6 +67,8 @@ function groupFixtures(fixtures: Fixture[]): DayGroup[] {
 /* ---------- main component ---------- */
 
 export function MatchBrowserContent() {
+  const t = useT();
+  const fmt = useFormat();
   const router = useRouter();
   const preferredProfile = useRef(useSearchParams().get("profile"));
   const [search, setSearch] = useState("");
@@ -106,7 +93,7 @@ export function MatchBrowserContent() {
         setActiveSession(sessions[0] ?? null);
       })
       .catch((e: unknown) => {
-        if (!cancelled) setError(e instanceof Error ? e.message : "Couldn't load matches.");
+        if (!cancelled) setError(e instanceof Error ? e.message : t("matches.err.load"));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -134,8 +121,8 @@ export function MatchBrowserContent() {
           !q ||
           [f.home.name, f.away.name, f.competition].some((t) => t?.toLowerCase().includes(q)),
       );
-    return groupFixtures(list);
-  }, [fixtures, filter, search]);
+    return groupFixtures(list, (iso) => fmt.day(iso, false), t("matches.otherFixtures"));
+  }, [fixtures, filter, search, fmt, t]);
 
   const resetStore = useCallback((session: ShowSession) => {
     useShowStore.setState({
@@ -158,7 +145,7 @@ export function MatchBrowserContent() {
       resetStore(session);
       router.push(`/studio/${session.id}`);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Couldn't resume the session.");
+      setError(e instanceof Error ? e.message : t("matches.err.resume"));
       setResuming(false);
     }
   };
@@ -166,7 +153,7 @@ export function MatchBrowserContent() {
   const startShow = async (fixtureId: string) => {
     const profile = profiles.find((p) => p.id === profileId) ?? profiles[0];
     if (!profile) {
-      setError("Create a show profile first: Show Profiles → New profile.");
+      setError(t("matches.err.noProfile"));
       return;
     }
     setStarting(fixtureId);
@@ -189,7 +176,7 @@ export function MatchBrowserContent() {
       });
       router.push(`/studio/${session.id}`);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Couldn't start the show.");
+      setError(e instanceof Error ? e.message : t("matches.err.start"));
       setStarting(null);
     }
   };
@@ -199,7 +186,7 @@ export function MatchBrowserContent() {
 
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
-      <PageHeader title="Matches" description="Pick a match to start a show. Live matches are listed first." />
+      <PageHeader title={t("matches.title")} description={t("matches.description")} />
 
       {error && <Alert tone="error" onDismiss={() => setError(null)}>{error}</Alert>}
 
@@ -212,15 +199,15 @@ export function MatchBrowserContent() {
                 <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60 motion-reduce:animate-none" />
                 <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
               </span>
-              Your show is still running
-              <Badge tone="success" className="capitalize">{activeSession.state}</Badge>
+              {t("matches.stillRunning")}
+              <Badge tone="success">{t(`state.${activeSession.state}` as const)}</Badge>
             </p>
             <p className="mt-1 truncate text-base font-semibold text-zinc-50">
-              {activeFixture ? `${activeFixture.home.name} vs ${activeFixture.away.name}` : `Match ${activeSession.match_id}`}
+              {activeFixture ? `${activeFixture.home.name} ${t("common.vs")} ${activeFixture.away.name}` : t("matches.matchId", { id: activeSession.match_id })}
             </p>
           </div>
           <Button variant="primary" size="lg" onClick={resume} loading={resuming}>
-            {resuming ? "Resuming…" : "Resume show"}
+            {resuming ? t("matches.resuming") : t("matches.resume")}
             {!resuming && <ChevronRight className="h-4 w-4" aria-hidden />}
           </Button>
         </div>
@@ -228,8 +215,8 @@ export function MatchBrowserContent() {
 
       {/* Controls */}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
-        <div role="tablist" aria-label="Filter matches" className="inline-flex self-start rounded-lg bg-zinc-900 p-1">
-          {FILTERS.map(({ id, label }) => {
+        <div role="tablist" aria-label={t("matches.filter")} className="inline-flex self-start rounded-lg bg-zinc-900 p-1">
+          {FILTERS.map((id) => {
             const active = filter === id;
             return (
               <button
@@ -243,7 +230,7 @@ export function MatchBrowserContent() {
                   active ? "bg-zinc-700 text-zinc-50" : "text-zinc-400 hover:text-zinc-100",
                 )}
               >
-                {label}
+                {t(`matches.filter.${id}` as const)}
                 <span className={cn("ml-1.5 text-xs tabular-nums", active ? "text-emerald-400" : "text-zinc-500")}>
                   {counts[id]}
                 </span>
@@ -256,8 +243,8 @@ export function MatchBrowserContent() {
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" aria-hidden />
           <input
             type="search"
-            aria-label="Search teams or competitions"
-            placeholder="Search teams or competitions"
+            aria-label={t("matches.search")}
+            placeholder={t("matches.search")}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className={cn(inputClass, "pl-9")}
@@ -268,16 +255,16 @@ export function MatchBrowserContent() {
       {/* Which profile will the show use? Always visible, never a surprise. */}
       {!loading && (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-zinc-800 bg-zinc-900/40 px-4 py-3 text-sm">
-          <span className="text-zinc-400">Starting shows with</span>
+          <span className="text-zinc-400">{t("matches.startingWith")}</span>
           {profiles.length === 0 ? (
             <Link href="/shows" className="font-medium text-emerald-400 hover:text-emerald-300">
-              Create a show profile first →
+              {t("matches.createProfile")}
             </Link>
           ) : profiles.length === 1 ? (
             <span className="font-medium text-zinc-100">{activeProfile?.name}</span>
           ) : (
             <select
-              aria-label="Show profile"
+              aria-label={t("matches.profileAria")}
               value={profileId}
               onChange={(e) => setProfileId(e.target.value)}
               className={cn(inputClass, "w-auto py-1.5")}
@@ -287,7 +274,7 @@ export function MatchBrowserContent() {
           )}
           {profiles.length > 0 && (
             <Link href="/shows" className="ml-auto text-xs text-zinc-400 hover:text-zinc-100">
-              Manage profiles
+              {t("matches.manageProfiles")}
             </Link>
           )}
         </div>
@@ -296,20 +283,20 @@ export function MatchBrowserContent() {
       {/* Content */}
       <main className="space-y-8" aria-busy={loading}>
         {loading ? (
-          <LoadingList />
+          <LoadingList label={t("matches.loading")} />
         ) : grouped.length === 0 ? (
           <EmptyState
             icon={<CalendarX2 className="h-7 w-7" />}
             title={
-              search ? `No matches for “${search}”`
-              : filter === "live" ? "No matches are live right now"
-              : filter === "today" ? "No matches are scheduled for today"
-              : "No fixtures are available yet"
+              search ? t("matches.empty.search", { q: search })
+              : filter === "live" ? t("matches.empty.live")
+              : filter === "today" ? t("matches.empty.today")
+              : t("matches.empty.none")
             }
-            description={fixtures.length > 0 ? "Try another filter or clear the search." : "Fixtures appear once the data provider has synced."}
+            description={fixtures.length > 0 ? t("matches.empty.tryOther") : t("matches.empty.sync")}
             action={
               (filter !== "all" || search) && fixtures.length > 0 ? (
-                <Button onClick={() => { setFilter("all"); setSearch(""); }}>Show all matches</Button>
+                <Button onClick={() => { setFilter("all"); setSearch(""); }}>{t("matches.showAll")}</Button>
               ) : undefined
             }
           />
@@ -326,6 +313,8 @@ export function MatchBrowserContent() {
                         <FixtureRow
                           key={f.id}
                           fixture={f}
+                          t={t}
+                          time={fmt.time(f.kickoff)}
                           starting={starting === f.id}
                           disabled={starting !== null || profiles.length === 0}
                           onStart={() => startShow(f.id)}
@@ -346,9 +335,11 @@ export function MatchBrowserContent() {
 /* ---------- pieces ---------- */
 
 function FixtureRow({
-  fixture, starting, disabled, onStart,
+  fixture, t, time, starting, disabled, onStart,
 }: {
   fixture: Fixture;
+  t: TFn;
+  time: string;
   starting: boolean;
   disabled: boolean;
   onStart: () => void;
@@ -369,18 +360,18 @@ function FixtureRow({
         {isLive ? (
           <Badge tone="live" className="gap-1.5">
             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-red-400 motion-reduce:animate-none" aria-hidden />
-            Live
+            {t("common.live")}
           </Badge>
         ) : isFinished ? (
-          <span className="text-sm font-medium text-zinc-400">Full time</span>
+          <span className="text-sm font-medium text-zinc-400">{t("matches.fullTime")}</span>
         ) : (
           <time dateTime={fixture.kickoff} className="text-sm font-semibold tabular-nums text-zinc-100">
-            {formatTime(fixture.kickoff)}
+            {time}
           </time>
         )}
         {missing.length > 0 && (
-          <span title={`No provider coverage for: ${missing.join(", ")}`}>
-            <Badge tone="warn">Limited data</Badge>
+          <span title={t("matches.limitedHint", { list: missing.join(", ") })}>
+            <Badge tone="warn">{t("matches.limited")}</Badge>
           </span>
         )}
       </div>
@@ -388,7 +379,7 @@ function FixtureRow({
       {/* Who */}
       <div className="grid min-w-0 grid-cols-[1fr_auto_1fr] items-center gap-3 sm:gap-5">
         <TeamLine team={fixture.home} />
-        <span className="text-xs font-medium uppercase text-zinc-500">vs</span>
+        <span className="text-xs font-medium uppercase text-zinc-500">{t("common.vs")}</span>
         <TeamLine team={fixture.away} align="right" />
       </div>
 
@@ -397,20 +388,17 @@ function FixtureRow({
         onClick={onStart}
         disabled={disabled}
         loading={starting}
-        aria-label={`Start show: ${fixture.home.name} vs ${fixture.away.name}`}
+        aria-label={t("matches.startAria", { home: fixture.home.name, away: fixture.away.name })}
         className="col-span-2 sm:col-span-1"
       >
         {!starting && <Play className="h-3.5 w-3.5" aria-hidden />}
-        {starting ? "Starting…" : "Start show"}
+        {starting ? t("matches.starting") : t("matches.startShow")}
       </Button>
     </li>
   );
 }
 
 function TeamLine({ team, align = "left" }: { team: Fixture["home"]; align?: "left" | "right" }) {
-  const [failed, setFailed] = useState(false);
-  const showCrest = Boolean(team.crestUrl) && !failed;
-
   return (
     <div
       className={`flex min-w-0 items-center gap-2.5 ${
@@ -418,31 +406,17 @@ function TeamLine({ team, align = "left" }: { team: Fixture["home"]; align?: "le
       }`}
     >
       <div className="h-9 w-9 shrink-0">
-        {showCrest ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={`${API_BASE}${team.crestUrl}`}
-            alt=""
-            className="h-full w-full object-contain"
-            onError={() => setFailed(true)}
-          />
-        ) : (
-          <div
-            className="flex h-full w-full items-center justify-center rounded-full bg-zinc-700 text-[10px] font-bold text-white"
-            style={team.color ? { backgroundColor: team.color } : undefined}
-          >
-            {(team.shortName ?? team.name).slice(0, 3).toUpperCase()}
-          </div>
-        )}
+        {/* provider crest → /crests/<slug>.svg → original generated crest */}
+        <TeamCrest name={team.name} color={team.color || "#3f3f46"} crestUrl={team.crestUrl} size={36} flat />
       </div>
       <span className="min-w-0 truncate text-sm font-medium text-zinc-100 sm:text-base">{team.name}</span>
     </div>
   );
 }
 
-function LoadingList() {
+function LoadingList({ label }: { label: string }) {
   return (
-    <div className="space-y-3" aria-label="Loading matches">
+    <div className="space-y-3" aria-label={label}>
       {[0, 1, 2].map((i) => <Skeleton key={i} className="h-[76px] rounded-xl" />)}
     </div>
   );

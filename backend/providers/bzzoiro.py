@@ -255,44 +255,79 @@ class BzzoiroProvider(FootballProvider):
 
     def get_lineups(self, match_id: str) -> Iterable[Lineup]:
         """
-        GET /events/{id}/lineups/
-        Returns {"lineups": null} when unavailable.
+        Fetch lineups from Bzzoiro and normalize to Lineup DTOs.
+
+        Bzzoiro returns positions as single letters (G/D/M/F) and jersey number
+        as `jersey_number`. We map to full role names (GK/DF/MF/FW) and to
+        `number` so downstream code (and the frontend) work with a consistent shape.
         """
+        import os
+        import requests as http
+        from .schemas import Lineup
+        from datetime import datetime, timezone
+
+        key = os.getenv("FOOTBALL_API_KEY")
+        if not key:
+            return []
+
+        # Map Bzzoiro's single-letter position to full role name
+        POSITION_MAP = {
+            "G": "GK",
+            "GK": "GK",
+            "D": "DF",
+            "DF": "DF",
+            "DEF": "DF",
+            "M": "MF",
+            "MF": "MF",
+            "MID": "MF",
+            "F": "FW",
+            "FW": "FW",
+            "ATT": "FW",
+            "ST": "FW",
+        }
+
+        def normalize_player(p: dict) -> dict:
+            raw_pos = (p.get("position") or "").upper().strip()
+            return {
+                "name": p.get("name") or p.get("short_name") or p.get("player_name") or "",
+                "number": p.get("jersey_number") or p.get("number"),
+                "position": POSITION_MAP.get(raw_pos, raw_pos),
+            }
+
         try:
-            data = self._get(f"/events/{match_id}/lineups/")
-        except ProviderError:
-            return []
+            r = http.get(
+                f"https://sports.bzzoiro.com/api/v2/events/{match_id}/lineups/",
+                headers={"Authorization": f"Token {key}"},
+                timeout=10,
+            )
+            if not r.ok:
+                return []
 
-        if not data or data.get("lineups") is None:
-            return []
+            data = r.json()
+            lineups = data.get("lineups")
+            if not lineups:
+                return []  # lineup_status: "unavailable"
 
-        lu = data["lineups"]
-        if not isinstance(lu, dict):
-            return []
+            results = []
+            for side in ("home", "away"):
+                side_data = lineups.get(side)
+                if not side_data:
+                    continue
 
-        lineups: list[Lineup] = []
-        for side_key in ("home", "away"):
-            team_data = lu.get(side_key)
-            if not isinstance(team_data, dict):
-                continue
-            players_raw = team_data.get("players") or team_data.get("starting_xi") or []
-            players = [
-                {
-                    "id": str(p.get("id") or ""),
-                    "name": p.get("name") or "",
-                    "position": p.get("position") or "",
-                    "number": p.get("number"),
-                }
-                for p in players_raw
-            ]
-            lineups.append(Lineup(
-                match_id=str(match_id),
-                team_id=side_key,
-                formation=team_data.get("formation") or "",
-                players=players,
-                source_updated_at=datetime.now(timezone.utc),
-            ))
-        return lineups
+                players = [normalize_player(p) for p in (side_data.get("players") or [])]
+                results.append(Lineup(
+                    match_id=match_id,
+                    team_id=str(side_data.get("team_id") or ""),
+                    formation=side_data.get("formation") or "",
+                    players=players,
+                    source_updated_at=datetime.now(timezone.utc),
+                ))
+            return results
+
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning("get_lineups %s failed: %s", match_id, e)
+            return []
     
     def get_head_to_head(self, team_a: str, team_b: str, limit: int = 10):
         import requests as http, os

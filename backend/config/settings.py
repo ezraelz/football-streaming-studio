@@ -22,7 +22,7 @@ load_dotenv(BASE_DIR / ".env")
 
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "dev-insecure-change-me")
 DEBUG = os.getenv("DJANGO_DEBUG", "1") == "1"
-ALLOWED_HOSTS = os.getenv("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
+ALLOWED_HOSTS = os.getenv("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1,testserver").split(",")
 
 INSTALLED_APPS = [
     "daphne",
@@ -166,6 +166,17 @@ CHANNEL_LAYERS = {
     },
 } if os.getenv("REDIS_URL") else {
     "default": {"BACKEND": "channels.layers.InMemoryChannelLayer"},
+}
+
+CELERY_BROKER_URL = 'redis://localhost:6379/0'
+CELERY_RESULT_BACKEND = 'redis://localhost:6379/0'
+CELERY_TIMEZONE = 'UTC'
+
+CELERY_BEAT_SCHEDULE = {
+    'poll-matches-every-30-seconds': {
+        'task': 'matches.tasks.poll_matches_task',
+        'schedule': 30.0,  # Run every 30 seconds
+    },
 }
 
 # Default primary key field type

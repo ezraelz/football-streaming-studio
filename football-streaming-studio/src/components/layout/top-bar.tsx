@@ -4,16 +4,18 @@ import Link from "next/link";
 import { Pause, Play, OctagonX } from "lucide-react";
 import { useShowStore } from "@/lib/stores/show-store";
 import { api } from "@/lib/api/client";
-import { cn, timeAgo } from "@/lib/utility/utils";
+import { cn } from "@/lib/utility/utils";
+import { useT } from "@/lib/i18n";
+import { useFormat } from "@/lib/i18n/use-format";
 import { useNow } from "@/lib/hooks/use-now";
 import { Button, buttonClass } from "@/components/ui/button";
 import { ConfirmButton } from "@/components/ui/confirm-button";
 import { StatePill } from "@/components/ui/badge";
 
 const FRESHNESS = {
-  fresh: { label: "Data live", dot: "bg-emerald-400", text: "text-zinc-300" },
-  stale: { label: "Data stale", dot: "bg-amber-400", text: "text-amber-300" },
-  disconnected: { label: "Data lost", dot: "bg-red-400", text: "text-red-300" },
+  fresh: { key: "top.dataLive", dot: "bg-emerald-400", text: "text-zinc-300" },
+  stale: { key: "top.dataStale", dot: "bg-amber-400", text: "text-amber-300" },
+  disconnected: { key: "top.dataLost", dot: "bg-red-400", text: "text-red-300" },
 } as const;
 
 /**
@@ -22,6 +24,8 @@ const FRESHNESS = {
  * Pause/Resume, and needs a deliberate second click.
  */
 export function TopBar() {
+  const t = useT();
+  const fmt = useFormat();
   const { session, snapshot, emergencyStop, setSession } = useShowStore();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -42,7 +46,7 @@ export function TopBar() {
       setSession(updated);
       if (target === "stopped") emergencyStop();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "State change failed");
+      setError(e instanceof Error ? e.message : t("top.stateFailed"));
     } finally {
       setBusy(null);
     }
@@ -63,7 +67,7 @@ export function TopBar() {
           </div>
         )}
         <span className="hidden text-sm text-zinc-400 md:inline">
-          {session.mode === "human" ? "Human presenter" : "Automated AI"}
+          {session.mode === "human" ? t("top.human") : t("top.automated")}
         </span>
       </div>
 
@@ -77,25 +81,25 @@ export function TopBar() {
         {fresh && snapshot && mounted && (
           <span className={cn("flex items-center gap-1.5 text-xs", fresh.text)}>
             <span className={cn("h-2 w-2 rounded-full", fresh.dot)} aria-hidden />
-            {fresh.label}
-            <span className="hidden text-zinc-500 sm:inline">· {timeAgo(snapshot.receivedAt)}</span>
+            {t(fresh.key)}
+            <span className="hidden text-zinc-500 sm:inline">· {fmt.ago(snapshot.receivedAt)}</span>
           </span>
         )}
 
         {stopped ? (
           <Link href="/" className={buttonClass("primary", "md")}>
-            Pick next match
+            {t("top.pickNext")}
           </Link>
         ) : (
           <>
             {session.state === "live" && (
               <Button onClick={() => transition("paused")} loading={busy === "paused"} disabled={busy !== null}>
-                <Pause className="h-4 w-4" aria-hidden /> Pause
+                <Pause className="h-4 w-4" aria-hidden /> {t("top.pause")}
               </Button>
             )}
             {session.state === "paused" && (
               <Button variant="primary" onClick={() => transition("live")} loading={busy === "live"} disabled={busy !== null}>
-                <Play className="h-4 w-4" aria-hidden /> Resume
+                <Play className="h-4 w-4" aria-hidden /> {t("top.resume")}
               </Button>
             )}
 
@@ -104,12 +108,12 @@ export function TopBar() {
             <ConfirmButton
               variant="danger"
               icon={<OctagonX className="h-4 w-4" aria-hidden />}
-              confirmLabel="Click again to stop"
+              confirmLabel={t("top.confirmStop")}
               loading={busy === "stopped"}
               disabled={busy !== null && busy !== "stopped"}
               onConfirm={() => transition("stopped")}
             >
-              Emergency stop
+              {t("top.stop")}
             </ConfirmButton>
           </>
         )}

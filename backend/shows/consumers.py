@@ -70,3 +70,9 @@ class SessionConsumer(AsyncWebsocketConsumer):
     async def editorial_event(self, event):
         await self.send(text_data=json.dumps({"type": "editorial.update", "data": event["data"]}))
         
+    async def speech_event(self, event):
+        await self.send(text_data=json.dumps({
+            "type": "speech.update",
+            "data": event["data"],
+        }))
+        

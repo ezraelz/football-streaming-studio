@@ -1,6 +1,8 @@
+"use client";
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utility/utils";
 import type { SessionState } from "@/lib/types/types";
+import { useT } from "@/lib/i18n";
 
 export type Tone = "neutral" | "live" | "success" | "warn" | "info" | "danger";
 
@@ -29,17 +31,18 @@ export function Badge({
   );
 }
 
-const STATE_META: Record<SessionState, { tone: Tone; label: string; pulse?: boolean }> = {
-  configured: { tone: "info", label: "Configured" },
-  armed: { tone: "info", label: "Armed" },
-  live: { tone: "live", label: "Live", pulse: true },
-  paused: { tone: "warn", label: "Paused" },
-  degraded: { tone: "warn", label: "Degraded" },
-  stopped: { tone: "neutral", label: "Stopped" },
+const STATE_META: Record<SessionState, { tone: Tone; pulse?: boolean }> = {
+  configured: { tone: "info" },
+  armed: { tone: "info" },
+  live: { tone: "live", pulse: true },
+  paused: { tone: "warn" },
+  degraded: { tone: "warn" },
+  stopped: { tone: "neutral" },
 };
 
 /** Session state pill. Red is reserved for "on air". */
 export function StatePill({ state, className }: { state: SessionState; className?: string }) {
+  const t = useT();
   const meta = STATE_META[state];
   return (
     <Badge tone={meta.tone} className={cn("gap-1.5 rounded-full px-2.5 py-1 uppercase tracking-wide", className)}>
@@ -49,7 +52,7 @@ export function StatePill({ state, className }: { state: SessionState; className
         )}
         <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-current" />
       </span>
-      {meta.label}
+      {t(`state.${state}` as const)}
     </Badge>
   );
 }

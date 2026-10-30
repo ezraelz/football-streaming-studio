@@ -1,16 +1,18 @@
 from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 
 from audit.models import LogKind
 from audit.services import log_and_broadcast
+from .services import broadcast_commentary
 from shows.models import ShowSession
 
-from .models import CommentaryItem, CommentaryStatus
+from .models import CommentaryItem, CommentaryStatus, SpeechJob, SpeechStatus
 from .serializers import CommentaryItemSerializer
-
+from django.http import FileResponse
+import os
 
 def _own_session(user, session_id):
     return ShowSession.objects.get(
@@ -142,3 +144,60 @@ def mark_played(request, item_id):
         detail={"commentary_id": str(item.id)},
     )
     return Response({"status": "played"})
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def approve(request, item_id):
+    item = get_object_or_404(
+        CommentaryItem, id=item_id, session__show_profile__owner=request.user
+    )
+    if item.status not in (CommentaryStatus.PENDING_APPROVAL, CommentaryStatus.SKIPPED):
+        return Response({"detail": f"Cannot approve item in status {item.status}"}, status=409)
+
+    item.status = CommentaryStatus.QUEUED
+    item.save(update_fields=["status", "updated_at"])
+
+    log_and_broadcast(item.session, LogKind.COMMENTARY, f"Approved: {item.text[:60]}…", detail={"commentary_id": str(item.id)})
+    broadcast_commentary(item)
+
+    # Kick off TTS in a background thread so the approve endpoint returns fast
+    import threading
+    def _tts():
+        from .speech_services import synthesize_for_commentary
+        synthesize_for_commentary(item)
+    threading.Thread(target=_tts, daemon=True).start()
+
+    return Response(CommentaryItemSerializer(item).data)
+
+
+
+@api_view(["GET"])
+@permission_classes([AllowAny])  # token-scoped via job ID
+def serve_speech(request, job_id):
+    """Serve the TTS audio for a job. Public — the job UUID is the credential."""
+    try:
+        job = SpeechJob.objects.get(id=job_id, status=SpeechStatus.READY)
+    except SpeechJob.DoesNotExist:
+        return Response({"detail": "not found"}, status=404)
+
+    path = job.audio_path
+    if not path or not os.path.exists(path):
+        return Response({"detail": "audio file missing"}, status=404)
+
+    # Serve with a cache-friendly content type
+    media_type = "audio/mpeg"
+    if path.endswith(".wav"):
+        media_type = "audio/wav"
+    return FileResponse(open(path, "rb"), content_type=media_type)
+
+
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def mark_speech_played(request, job_id):
+    job = get_object_or_404(
+        SpeechJob, id=job_id, commentary__session__show_profile__owner=request.user
+    )
+    from .speech_services import mark_played
+    mark_played(job)
+    return Response({"status": job.status})

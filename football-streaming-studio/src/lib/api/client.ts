@@ -114,6 +114,19 @@ export interface TeamRef {
   crestUrl?: string | null;
 }
 
+export interface LineupPlayer {
+  name: string;
+  number?: number | null;
+  position?: string | null;   // "GK", "LB", "CB", "CM", "ST"
+  x?: number | null;          // 0..100 if Bzzoiro provides it
+  y?: number | null;
+}
+
+export interface LineupSide {
+  formation: string;           // "4-3-3" etc.
+  players: LineupPlayer[];
+}
+
 export interface OverlayState {
   session_id: string;
   /** League name, used to theme the graphics (optional). */
@@ -147,6 +160,10 @@ export interface OverlayState {
     text: string;
     priority: string;
     expires_at: string;
+  } | null;
+  lineups?: {
+    home: LineupSide | null;
+    away: LineupSide | null;
   } | null;
 }
 
@@ -207,7 +224,7 @@ export interface EditorialCard {
   card_type:
     | "fixture_intro" | "lineups" | "standings" | "form"
     | "head_to_head" | "top_scorers" | "match_summary"
-    | "countdown" | "custom";
+    | "countdown" | "custom" | "momentun";
   title: string;
   payload: Record<string, unknown>;
   visible: boolean;
@@ -244,6 +261,84 @@ export interface Prediction {
   model_version: string;
   timestamp: string;
   reason?: string;
+}
+
+export interface MatchAvailability {
+  event_id?: number;
+  status?: string;
+  lineup_status?: "confirmed" | "predicted" | "unavailable";
+  available: {
+    stats?: boolean;
+    lineups?: boolean;
+    incidents?: boolean;
+    shotmap?: boolean;
+    xg?: boolean;
+    momentum?: boolean;
+    average_positions?: boolean;
+    player_stats?: boolean;
+    prediction?: boolean;
+    broadcasts?: boolean;
+    odds?: boolean;
+  };
+  stat_keys?: string[];
+  odds_markets?: string[];
+}
+
+export interface PredictionPayload {
+  competition: string;
+  home_name: string;
+  away_name: string;
+  markets: {
+    "1x2"?: { home: number; draw: number; away: number };
+    over_under_25?: { over: number | null; under: number | null };
+    btts?: { yes: number | null; no: number | null };
+  };
+  model_version?: string | null;
+  generated_at?: string | null;
+  unavailable?: boolean;
+  reason?: string | null;
+  model_notes?: string | null;
+}
+
+export interface LiveMatch {
+  match_id: string;
+  competition: string;
+  home_short: string;
+  away_short: string;
+  home_name?: string;
+  away_name?: string;
+  home_score: number | null;
+  away_score: number | null;
+  minute: number | null;
+  period: string;
+  status: string;
+}
+
+export interface MomentumPayload {
+  competition: string;
+  home_name: string;
+  away_name: string;
+  home_short: string;
+  away_short: string;
+  home_color: string;
+  away_color: string;
+  samples: Array<{ minute: number; value: number }>;
+  unavailable?: boolean;
+}
+
+export interface Incident {
+  id: string;
+  type: string;          // "goal" | "yellow_card" | "substitution" | "var" | ...
+  period: number | null;
+  minute: number | null;
+  added_time: number | null;
+  second: number | null;
+  team: "home" | "away" | null;
+  player_name: string | null;
+  related_name: string | null;
+  score: { home: number; away: number } | null;
+  important: boolean;
+  rescinded: boolean;
 }
 
 // --- typed surface ---
@@ -391,5 +486,23 @@ export const api = {
   h2h: (matchId: string) => request<H2HMeeting[]>(`/matches/${matchId}/h2h`),
   prediction: (matchId: string) => request<Prediction>(`/matches/${matchId}/prediction`),
   teamFixtures: (teamId: string) => request<TeamFixture[]>(`/teams/${teamId}/fixtures`),
+
+  matchAvailability: (sessionId: string) =>
+    request<MatchAvailability>(`/show-sessions/${sessionId}/match-availability`),
+
+  liveScores: (sessionId: string, leagueId?: string) => {
+    const qs = leagueId ? `?league_id=${encodeURIComponent(leagueId)}` : "";
+    return request<{ matches: LiveMatch[]; count: number; fetched_at: number }>(
+      `/show-sessions/${sessionId}/live-scores${qs}`
+    );
+  },
+
+  markSpeechPlayed: (jobId: string) =>
+    request<{ status: string }>(`/speech/${jobId}/played`, { method: "POST" }),
+
+  incidents: (matchId: string) =>
+    request<{ match_id: string; incidents: Incident[]; count: number }>(
+      `/matches/${matchId}/incidents`
+    ),
 };
 

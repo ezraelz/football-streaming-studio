@@ -6,6 +6,8 @@ import { Menu, X } from "lucide-react";
 import { Sidebar } from "@/components/layout/sidebar";
 import { TopBar } from "@/components/layout/top-bar";
 import { AuthGuard } from "@/components/layout/auth-guard";
+import { useT } from "@/lib/i18n";
+import { LanguageSwitch, ThemeToggle } from "@/components/ui/prefs";
 
 export default function ControlLayout({ children }: { children: ReactNode }) {
   return (
@@ -17,6 +19,7 @@ export default function ControlLayout({ children }: { children: ReactNode }) {
 
 function LayoutShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const t = useT();
   const [menuState, setMenuState] = useState({ open: false, pathname: "" });
   const menuOpen = menuState.open && menuState.pathname === pathname;
 
@@ -45,13 +48,13 @@ function LayoutShell({ children }: { children: ReactNode }) {
         href="#main-content"
         className="sr-only z-50 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white focus:not-sr-only focus:fixed focus:left-3 focus:top-3"
       >
-        Skip to content
+        {t("nav.skip")}
       </a>
 
       {/* Backdrop (mobile only) */}
       {menuOpen && (
         <button
-          aria-label="Close menu"
+          aria-label={t("nav.closeMenu")}
           onClick={() => setMenuOpen(false)}
           className="fixed inset-0 z-30 bg-black/60 backdrop-blur-sm lg:hidden"
         />
@@ -73,13 +76,17 @@ function LayoutShell({ children }: { children: ReactNode }) {
         <div className="flex items-center gap-3 border-b border-zinc-800 bg-zinc-900 px-4 py-2.5 lg:hidden">
           <button
             onClick={() => setMenuOpen(!menuOpen)}
-            aria-label={menuOpen ? "Close menu" : "Open menu"}
+            aria-label={menuOpen ? t("nav.closeMenu") : t("nav.openMenu")}
             aria-expanded={menuOpen}
             className="rounded-lg p-2 text-zinc-300 transition-colors hover:bg-zinc-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
           >
             {menuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
           </button>
-          <span className="text-sm font-semibold">Streaming Studio</span>
+          <span className="text-sm font-semibold">{t("app.name")}</span>
+          <span className="ml-auto flex items-center gap-2">
+            <LanguageSwitch compact />
+            <ThemeToggle />
+          </span>
         </div>
 
         <TopBar />
@@ -104,18 +111,19 @@ function LayoutFallback() {
 }
 
 function SidebarFallback() {
+  const t = useT();
   return (
     <aside className="flex h-full w-60 flex-col border-r border-zinc-800 bg-zinc-900">
       <div className="border-b border-zinc-800 px-4 py-5">
-        <div className="text-sm text-zinc-500">Football</div>
-        <div className="text-lg font-semibold text-zinc-100">Streaming Studio</div>
+        <div className="text-sm text-zinc-500">{t("app.tagline")}</div>
+        <div className="text-lg font-semibold text-zinc-100">{t("app.name")}</div>
       </div>
       <nav className="flex-1 space-y-2 p-3" aria-hidden>
         {[0, 1, 2, 3].map((i) => (
           <div key={i} className="h-9 animate-pulse rounded-lg bg-zinc-800/60 motion-reduce:animate-none" />
         ))}
       </nav>
-      <div className="border-t border-zinc-800 p-3 text-xs text-zinc-500">Version 1.0 (MVP)</div>
+      <div className="border-t border-zinc-800 p-3 text-xs text-zinc-500">{t("nav.version")}</div>
     </aside>
   );
 }

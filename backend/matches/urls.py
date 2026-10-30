@@ -9,4 +9,5 @@ urlpatterns = [
     path("matches/<str:match_id>/h2h", views.get_h2h),
     path("matches/<str:match_id>/prediction", views.get_prediction),
     path("teams/<str:team_id>/fixtures", views.get_team_fixtures),
+    path("matches/<str:match_id>/incidents", views.get_incidents, name="match-incidents"),
 ]

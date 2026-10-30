@@ -10,3 +10,14 @@
 - Screen positions: main / left / right / bottom strip / ticker bar. Ticker = a `custom` card with payload `{ kind: "ticker", label, items }`.
 - Branding: `lib/branding/` (league themes, generated crests). Drop licensed SVGs in `public/crests/` and `public/leagues/`.
 - Design sandbox: `/overlay/demo` (dev only).
+
+## Language, theme and overlay options (v2)
+- **Amharic**: `lib/i18n/{en,am}.ts` (TypeScript enforces matching keys). `useT()` in components. Switch in the sidebar,
+  login page and Settings. Amharic disables letter-spacing/uppercase globally and loads Noto Sans Ethiopic.
+- **Light / dark**: `lib/theme`. Light mode re-points the zinc/emerald/red/amber palette variables in `globals.css`
+  (`html[data-theme="light"]`), so components need no `dark:` variants. Set System / Light / Dark in the sidebar or Settings.
+  The OBS overlay always ignores this and stays a broadcast surface.
+- **Overlay URL options**: `?token=…&lang=am|en&tone=dark|light&lite=1`. Settings builds the URL for you.
+  `tone=light` switches the cards to a light surface; `lite=1` removes blur for slower PCs.
+- **Ethiopian calendar / clock** (Settings → Appearance): affects match dates/times in the studio and the next-matches ticker.
+- Overlay scenes (scoreboard, stats, timeline, player, tactical) were rebuilt at broadcast-legible sizes and share one panel style.

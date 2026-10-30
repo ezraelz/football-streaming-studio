@@ -13,7 +13,16 @@ urlpatterns = [
         views.provision_obs,
         name="show-sessions-provision-obs",
     ),
-
+    path(
+        "show-sessions/<uuid:session_id>/match-availability",
+        views.match_availability,
+        name="show-sessions-match-availability",
+    ),
+    path(
+        "show-sessions/<uuid:session_id>/live-scores",
+        views.live_scores,
+        name="show-sessions-live-scores",
+    ),
     # Only match known transition targets — no wildcard.
     # This prevents /commentary, /log, etc. from being swallowed.
     re_path(

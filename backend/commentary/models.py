@@ -67,38 +67,50 @@ class CommentaryItem(models.Model):
 
     def __str__(self) -> str:
         return f"[{self.status}] {str(self.text)[:60]}"
-    
-    
+
+
 class SpeechStatus(models.TextChoices):
     QUEUED = "queued", "Queued"
-    SYNTHESIZED = "synthesized", "Synthesized"     # audio file ready
+    SYNTHESIZING = "synthesizing", "Synthesizing"
+    READY = "ready", "Ready"
+    PLAYING = "playing", "Playing"
     PLAYED = "played", "Played"
     FAILED = "failed", "Failed"
     EXPIRED = "expired", "Expired"
 
 
 class SpeechJob(models.Model):
-    """A TTS synthesis + playback lifecycle for one commentary line."""
+    """A TTS synthesis + playback job for one commentary line."""
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    commentary_item = models.OneToOneField(
-        CommentaryItem,
+    commentary = models.OneToOneField(
+        "commentary.CommentaryItem",
         on_delete=models.CASCADE,
         related_name="speech_job",
     )
+    provider = models.CharField(max_length=32, default="azure")
+    voice = models.CharField(max_length=128, blank=True, default="")
+    language = models.CharField(max_length=8, default="en")
+
     status = models.CharField(
         max_length=16, choices=SpeechStatus.choices, default=SpeechStatus.QUEUED
     )
-    provider = models.CharField(max_length=64, blank=True, default="")
     audio_path = models.CharField(max_length=512, blank=True, default="")
-    audio_url = models.CharField(max_length=512, blank=True, default="")
-    duration_seconds = models.FloatField(null=True, blank=True)
+    duration_ms = models.PositiveIntegerField(null=True, blank=True)
+    error = models.TextField(blank=True, default="")
 
-    expires_at = models.DateTimeField()
     created_at = models.DateTimeField(auto_now_add=True)
+    started_at = models.DateTimeField(null=True, blank=True)
     played_at = models.DateTimeField(null=True, blank=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
-        ordering = ["-created_at"]
+        ordering = ["created_at"]
         indexes = [
             models.Index(fields=["status", "-created_at"]),
+            models.Index(fields=["commentary"]),
         ]
+
+    def __str__(self) -> str:
+        return f"[{self.status}] {self.commentary.text[:40]}"
+    

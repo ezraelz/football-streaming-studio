@@ -119,3 +119,90 @@ def get_prediction(request, match_id):
     result["team_a"] = match.home_team_name
     result["team_b"] = match.away_team_name
     return Response(result)
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def get_incidents(request, match_id):
+    """
+    Proxy Bzzoiro's /events/{id}/incidents/.
+    Returns the normalized incidents list for this match.
+    """
+    import os
+    import logging
+    import requests as http
+    from django.http import JsonResponse
+
+    log = logging.getLogger(__name__)
+
+    try:
+        match = Match.objects.get(provider_match_id=match_id)
+    except Match.DoesNotExist:
+        return Response({"detail": "match not found"}, status=404)
+
+    api_key = os.getenv("FOOTBALL_API_KEY")
+    if not api_key:
+        return Response({"detail": "FOOTBALL_API_KEY not configured", "incidents": []}, status=503)
+
+    try:
+        r = http.get(
+            f"https://sports.bzzoiro.com/api/v2/events/{match.provider_match_id}/incidents/",
+            headers={"Authorization": f"Token {api_key}"},
+            timeout=10,
+        )
+        if not r.ok:
+            log.warning("incidents %s → HTTP %s", match.provider_match_id, r.status_code)
+            return Response({"detail": f"provider {r.status_code}", "incidents": []}, status=502)
+
+        data = r.json()
+        raw_incidents = data.get("incidents") or data.get("events") or []
+
+        normalized = []
+        for inc in raw_incidents:
+            if not isinstance(inc, dict):
+                continue
+
+            # Player names — Bzzoiro returns nested objects
+            player_obj = inc.get("player") or {}
+            related_obj = inc.get("related_player") or {}
+            player_name = player_obj.get("name") if isinstance(player_obj, dict) else None
+            related_name = related_obj.get("name") if isinstance(related_obj, dict) else None
+
+            # Sort key: (period, minute, second)
+            second = inc.get("second")
+            minute = inc.get("minute")
+            period = inc.get("period")
+            sort_key = (
+                int(period or 0),
+                int(minute or 0),
+                int(second or 0),
+            )
+
+            normalized.append({
+                "id": inc.get("id"),
+                "type": inc.get("type"),
+                "period": period,
+                "minute": minute,
+                "added_time": inc.get("added_time"),
+                "second": second,
+                "team": inc.get("team"),         # "home" | "away" | null
+                "player_name": player_name,
+                "related_name": related_name,
+                "score": inc.get("score"),
+                "important": bool(inc.get("important")),
+                "rescinded": bool(inc.get("rescinded")),
+                "sort_key": sort_key,
+            })
+
+        # Sort newest-first for timeline display
+        normalized.sort(key=lambda i: i["sort_key"])
+
+        return Response({
+            "match_id": match.provider_match_id,
+            "incidents": normalized,
+            "count": len(normalized),
+        })
+
+    except Exception as e:
+        log.warning("incidents %s failed: %s", match.provider_match_id, e)
+        return Response({"detail": str(e), "incidents": []}, status=502)
+    

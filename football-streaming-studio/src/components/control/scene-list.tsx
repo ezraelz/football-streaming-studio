@@ -9,14 +9,15 @@ import { useShowStore } from "@/lib/stores/show-store";
 import { api } from "@/lib/api/client";
 import { cn } from "@/lib/utility/utils";
 import { focusRing } from "@/components/ui/button";
+import { useT, type MsgKey } from "@/lib/i18n";
 
-const SCENES: { key: string; label: string; icon: LucideIcon }[] = [
-  { key: "scoreboard", label: "Scoreboard", icon: LayoutDashboard },
-  { key: "timeline", label: "Timeline", icon: History },
-  { key: "stats", label: "Match stats", icon: BarChart3 },
-  { key: "tactical", label: "Tactical", icon: Crosshair },
-  { key: "player", label: "Player", icon: UserRound },
-  { key: "lower-third", label: "Lower third", icon: Captions },
+const SCENES: { key: string; label: MsgKey; icon: LucideIcon }[] = [
+  { key: "scoreboard", label: "scene.scoreboard", icon: LayoutDashboard },
+  { key: "timeline", label: "scene.timeline", icon: History },
+  { key: "stats", label: "scene.stats", icon: BarChart3 },
+  { key: "tactical", label: "scene.tactical", icon: Crosshair },
+  { key: "player", label: "scene.player", icon: UserRound },
+  { key: "lower-third", label: "scene.lowerThird", icon: Captions },
 ];
 
 function isTyping(target: EventTarget | null) {
@@ -28,6 +29,7 @@ function isTyping(target: EventTarget | null) {
 /** Vision-mixer style scene buttons that sit directly under the program preview. */
 export function SceneList() {
   const params = useParams<{ sessionId: string }>();
+  const t = useT();
   const { activeScene, setScene } = useShowStore();
   const [syncError, setSyncError] = useState(false);
 
@@ -61,14 +63,13 @@ export function SceneList() {
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-zinc-100">Scenes</h2>
+        <h2 className="text-sm font-semibold text-zinc-100">{t("scene.heading")}</h2>
         <span className="text-xs text-zinc-400">
-          Press <kbd className="rounded bg-zinc-800 px-1 font-mono text-zinc-300">1</kbd>–
-          <kbd className="rounded bg-zinc-800 px-1 font-mono text-zinc-300">{SCENES.length}</kbd> to switch
+          {t("scene.pressKeys", { a: 1, b: SCENES.length })}
         </span>
       </div>
 
-      <div role="group" aria-label="Scenes" className="grid grid-cols-3 gap-2 sm:grid-cols-6">
+      <div role="group" aria-label={t("scene.heading")} className="grid grid-cols-3 gap-2 sm:grid-cols-6">
         {SCENES.map(({ key, label, icon: Icon }, i) => {
           const active = activeScene === key;
           return (
@@ -86,7 +87,7 @@ export function SceneList() {
             >
               <kbd className="absolute right-1.5 top-1.5 font-mono text-xs text-zinc-500">{i + 1}</kbd>
               <Icon className={cn("h-5 w-5", active ? "text-red-300" : "text-zinc-400")} aria-hidden />
-              <span className="truncate">{label}</span>
+              <span className="truncate">{t(label)}</span>
               {active && (
                 <span className="absolute inset-x-0 -bottom-px mx-auto h-0.5 w-8 rounded-full bg-red-400" aria-hidden />
               )}
@@ -97,7 +98,7 @@ export function SceneList() {
 
       {syncError && (
         <p role="status" className="text-xs text-amber-300">
-          Scene changed here, but couldn&apos;t reach the server. OBS may not have followed.
+          {t("scene.syncError")}
         </p>
       )}
     </div>

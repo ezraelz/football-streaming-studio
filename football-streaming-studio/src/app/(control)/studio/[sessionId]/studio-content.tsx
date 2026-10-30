@@ -15,6 +15,8 @@ import { Skeleton } from "@/components/ui/feedback";
 import { cn } from "@/lib/utility/utils";
 import { focusRing } from "@/components/ui/button";
 import type { ShowSession } from "@/lib/types/types";
+import { useT } from "@/lib/i18n";
+import { SpeechPlayer } from "@/components/control/speech-player";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -22,6 +24,7 @@ type Tab = "suggestions" | "graphics" | "match" | "analysis";
 
 export function StudioContent() {
   const params = useParams<{ sessionId: string }>();
+  const t = useT();
   const { session, snapshot, loadMock, setSession } = useShowStore();
   const [tab, setTab] = useState<Tab>("suggestions");
   const suggestions = usePendingSuggestions(params.sessionId);
@@ -59,15 +62,15 @@ export function StudioContent() {
     }
   });
 
-  if (!snapshot) return <StudioSkeleton message="Loading show…" />;
+  if (!snapshot) return <StudioSkeleton message={t("studio.loading")} />;
 
   const pending = suggestions.items.length;
 
   const tabs: { id: Tab; label: string; badge?: number }[] = [
-    { id: "suggestions", label: "Suggestions", badge: pending },
-    { id: "graphics", label: "Graphics" },
-    { id: "match", label: "Match data" },
-    { id: "analysis", label: "Analysis" }, 
+    { id: "suggestions", label: t("studio.tab.suggestions"), badge: pending },
+    { id: "graphics", label: t("studio.tab.graphics") },
+    { id: "match", label: t("studio.tab.match") },
+    { id: "analysis", label: t("studio.tab.analysis") },
   ];
 
   return (
@@ -76,12 +79,13 @@ export function StudioContent() {
       <div className="flex min-w-0 flex-col gap-4 lg:overflow-y-auto lg:pr-1">
         <MatchStrip />
         <PreviewPane sessionId={params.sessionId} />
+        <SpeechPlayer />
         <SceneList />
       </div>
 
       {/* Right: things that need a decision */}
       <aside className="flex min-h-0 flex-col rounded-xl border border-zinc-800 bg-zinc-900/60">
-        <div role="tablist" aria-label="Studio panels" className="flex gap-1 border-b border-zinc-800 p-1.5">
+        <div role="tablist" aria-label={t("studio.panels")} className="flex gap-1 border-b border-zinc-800 p-1.5">
           {tabs.map((t) => {
             const active = tab === t.id;
             return (
@@ -100,7 +104,7 @@ export function StudioContent() {
               >
                 {t.label}
                 {!!t.badge && (
-                  <span className="rounded-full bg-amber-500 px-1.5 text-xs font-semibold leading-5 text-zinc-950 tabular-nums">
+                  <span className="rounded-full bg-amber-500 px-1.5 text-xs font-semibold leading-5 text-black tabular-nums">
                     {t.badge}
                   </span>
                 )}
@@ -108,8 +112,6 @@ export function StudioContent() {
             );
           })}
         </div>
-
-
 
         <div
           role="tabpanel"
