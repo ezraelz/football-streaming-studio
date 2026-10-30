@@ -36,6 +36,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "corsheaders",
     "channels",
+    "django_celery_beat",
 
     "accounts",
     "shows",
@@ -168,16 +169,16 @@ CHANNEL_LAYERS = {
     "default": {"BACKEND": "channels.layers.InMemoryChannelLayer"},
 }
 
-CELERY_BROKER_URL = 'redis://localhost:6379/0'
-CELERY_RESULT_BACKEND = 'redis://localhost:6379/0'
-CELERY_TIMEZONE = 'UTC'
+# --- Celery ---
+CELERY_BROKER_URL = os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0")
+CELERY_RESULT_BACKEND = os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0")
+CELERY_TIMEZONE = "UTC"
+CELERY_TASK_TRACK_STARTED = True
+CELERY_TASK_TIME_LIMIT = 120   # hard limit: 2 minutes per task
+CELERY_TASK_SOFT_TIME_LIMIT = 90
 
-CELERY_BEAT_SCHEDULE = {
-    'poll-matches-every-30-seconds': {
-        'task': 'matches.tasks.poll_matches_task',
-        'schedule': 30.0,  # Run every 30 seconds
-    },
-}
+# Period schedule for django-celery-beat (managed via admin)
+CELERY_BEAT_SCHEDULER = "django_celery_beat.schedulers:DatabaseScheduler"
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.0/ref/settings/#default-auto-field

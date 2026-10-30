@@ -289,7 +289,8 @@ class BzzoiroProvider(FootballProvider):
         def normalize_player(p: dict) -> dict:
             raw_pos = (p.get("position") or "").upper().strip()
             return {
-                "name": p.get("name") or p.get("short_name") or p.get("player_name") or "",
+                "id": p.get("id") or p.get("player_id"), # Ensure this is captured!
+                "name": p.get("name") or p.get("short_name") or "",
                 "number": p.get("jersey_number") or p.get("number"),
                 "position": POSITION_MAP.get(raw_pos, raw_pos),
             }

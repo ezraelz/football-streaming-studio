@@ -239,7 +239,74 @@ def rotate_token_view(request, session_id):
     session = rotate_token(session)
     return Response(ShowSessionSerializer(session).data)
 
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def match_player_stats_list(request, session_id):
+    """
+    Return the full player-stats list for a match (played > 0 mins).
+    Used by the studio's player picker when seeding a player_stats card.
+    """
+    session = get_object_or_404(
+        ShowSession.objects.select_related("match"),
+        id=session_id,
+        show_profile__owner=request.user,
+    )
+    match = session.match
 
+    import os
+    import logging
+    import requests as http
+    log = logging.getLogger(__name__)
+
+    api_key = os.getenv("FOOTBALL_API_KEY")
+    if not api_key:
+        return Response({"players": []}, status=503)
+
+    try:
+        r = http.get(
+            f"https://sports.bzzoiro.com/api/v2/events/{match.provider_match_id}/player-stats/",
+            headers={"Authorization": f"Token {api_key}"},
+            timeout=10,
+        )
+        if not r.ok:
+            return Response({"players": []}, status=502)
+
+        data = r.json()
+        raw = data.get("players") or data.get("player_stats") or data.get("results") or []
+
+        players = []
+        for p in raw:
+            if not isinstance(p, dict):
+                continue
+            minutes = p.get("minutes_played") or 0
+            try:
+                minutes = int(minutes)
+            except (TypeError, ValueError):
+                minutes = 0
+            if minutes == 0:
+                continue
+
+            team_id = p.get("team_id")
+            is_home = str(team_id) == str(match.home_team_id)
+            players.append({
+                "player_id": str(p.get("player_id") or p.get("id") or ""),
+                "name": p.get("name") or "",
+                "team": "home" if is_home else "away",
+                "team_short": match.home_team_short if is_home else match.away_team_short,
+                "team_color": match.home_team_color if is_home else match.away_team_color,
+                "minutes": minutes,
+                "rating": p.get("rating"),
+                "goals": p.get("goals") or 0,
+                "assists": p.get("assists") or 0,
+            })
+
+        players.sort(key=lambda x: (-(x["rating"] or 0), -x["minutes"]))
+        return Response({"players": players})
+
+    except Exception as e:
+        log.warning("match_player_stats_list failed: %s", e)
+        return Response({"players": []}, status=502)
+    
 # --- Overlay (public, token-scoped, read-only) ---
 
 @api_view(["GET"])
@@ -899,172 +966,164 @@ def seed_editorial(request, session_id, card_type):
             "home": {"team": base["home"]["name"], "results": results_by_side["home"]},
             "away": {"team": base["away"]["name"], "results": results_by_side["away"]},
         }
-        title = f"Form · {match.home_team_short} vs {match.away_team_short}"
+        title = f"Form · {match.home_team_short} vs {match.away_team_short}" 
         
-        
-    # --- prediction ---
+    # --- prediction (combined with odds) ---
     elif card_type == "prediction":
+        # Try model prediction first (0-100 probabilities)
+        prediction = bsd_get(f"/events/{match.provider_match_id}/prediction/")
+        # Fall back to the plural endpoint if the singular returns 404 detail
+        if not prediction or (isinstance(prediction, dict) and prediction.get("detail")):
+            prediction = bsd_get(f"/predictions/{match.provider_match_id}/")
+
+        # Try consensus odds (decimal prices) — always available per spec
+        odds_data = bsd_get(f"/events/{match.provider_match_id}/odds/")
+        odds = odds_data.get("odds") if isinstance(odds_data, dict) else None
+
         payload = {
             "competition": base["competition"],
             "home_name": base["home"]["name"],
             "away_name": base["away"]["name"],
-            "markets": {},
-            "model_version": None,
-            "generated_at": None,
-            "unavailable": True,
-            "reason": "No prediction available for this match.",
+            "home_short": match.home_team_short,
+            "away_short": match.away_team_short,
+            "home_color": base["home"]["color"],
+            "away_color": base["away"]["color"],
+            "kickoff_label": match.kickoff.strftime("Kickoff · %a %H:%M") if match.kickoff else "",
+            "model": None,             # {home, draw, away, over_25, btts_yes, xg_home, xg_away, confidence, version}
+            "market": None,            # {home, draw, away, over_25, btts_yes} as implied probabilities
+            "prediction_available": False,
+            "odds_available": False,
         }
-        title = f"Prediction · {match.home_team_short} vs {match.away_team_short}"
+        title = f"Match forecast · {match.home_team_short} vs {match.away_team_short}"
 
-        def as_unit(v):
-            if v is None:
-                return None
-            try:
-                f = float(v)
-            except (TypeError, ValueError):
-                return None
-            return f / 100.0 if f > 1 else f
+        # --- MODEL PREDICTION ---
+        if prediction and isinstance(prediction, dict) and not prediction.get("detail"):
+            markets = prediction.get("markets") or {}
+            mr = markets.get("match_result") or {}
+            ou = markets.get("over_under") or {}
+            btts = markets.get("btts") or {}
+            eg = markets.get("expected_goals") or {}
 
-        def pick(source, *keys, default=None):
-            if not isinstance(source, dict):
-                return default
-            for k in keys:
-                v = source.get(k)
-                if v is not None:
-                    return v
-            return default
-
-        # ── Step 1: try Bzzoiro's own model ─────────────────────────────────
-        bsd_model = bsd_get(f"/predictions/{match.provider_match_id}/")
-        if not bsd_model or (isinstance(bsd_model, dict) and bsd_model.get("detail")):
-            bsd_model = bsd_get(f"/events/{match.provider_match_id}/prediction/")
-
-        if bsd_model and isinstance(bsd_model, dict) and not bsd_model.get("detail"):
-            raw_markets = (
-                bsd_model.get("markets")
-                or bsd_model.get("predictions")
-                or bsd_model.get("probabilities")
-                or bsd_model
-            )
-            result = raw_markets.get("result") if isinstance(raw_markets, dict) else None
-            probs = result or raw_markets or {}
-
-            home_p = as_unit(pick(probs, "home_win", "home", "1", "home_win_probability"))
-            draw_p = as_unit(pick(probs, "draw", "x", "draw_probability"))
-            away_p = as_unit(pick(probs, "away_win", "away", "2", "away_win_probability"))
-
-            if home_p is not None and draw_p is not None and away_p is not None:
-                payload["markets"]["1x2"] = {
-                    "home": round(home_p, 3),
-                    "draw": round(draw_p, 3),
-                    "away": round(away_p, 3),
-                }
-                payload["unavailable"] = False
-                payload["reason"] = None
-                payload["model_version"] = (
-                    bsd_model.get("model_version")
-                    or bsd_model.get("model")
-                    or "bzzoiro-model"
-                )
-                payload["generated_at"] = (
-                    bsd_model.get("generated_at")
-                    or bsd_model.get("timestamp")
-                    or bsd_model.get("updated_at")
-                )
-
-                # O/U 2.5 from the Bzzoiro model if present
-                totals = raw_markets.get("totals") or raw_markets.get("over_under") or {}
-                over25 = as_unit(pick(totals, "over_25", "over_25_goals", "over25"))
-                under25 = as_unit(pick(totals, "under_25", "under_25_goals", "under25"))
-                if over25 is not None or under25 is not None:
-                    payload["markets"]["over_under_25"] = {"over": over25, "under": under25}
-
-                btts = raw_markets.get("btts") or {}
-                yes = as_unit(pick(btts, "yes", "btts_yes"))
-                no = as_unit(pick(btts, "no", "btts_no"))
-                if yes is not None or no is not None:
-                    payload["markets"]["btts"] = {"yes": yes, "no": no}
-
-        # ── Step 2: Poisson model from recent results ───────────────────────
-        if payload["unavailable"]:
-            home_data = bsd_get(
-                "/events/",
-                params={"team_id": match.home_team_id, "status": "finished", "limit": 15},
-            )
-            away_data = bsd_get(
-                "/events/",
-                params={"team_id": match.away_team_id, "status": "finished", "limit": 15},
-            )
-
-            def extract_list(payload_obj):
-                if not payload_obj:
-                    return []
-                if isinstance(payload_obj, list):
-                    return payload_obj
-                return (
-                    payload_obj.get("results")
-                    or payload_obj.get("events")
-                    or payload_obj.get("data")
-                    or []
-                )
-
-            home_matches = extract_list(home_data)
-            away_matches = extract_list(away_data)
-
-            if len(home_matches) >= 3 and len(away_matches) >= 3:
+            # Legacy contract: market probabilities are 0-100
+            def pct(v):
+                if v is None:
+                    return None
                 try:
-                    from analysis.poisson import predict_1x2
-                    result = predict_1x2(
-                        home_matches=home_matches,
-                        away_matches=away_matches,
-                        home_team_id=match.home_team_id,
-                        away_team_id=match.away_team_id,
-                    )
-                    payload["markets"]["1x2"] = {
-                        "home": result["home"],
-                        "draw": result["draw"],
-                        "away": result["away"],
-                    }
-                    payload["unavailable"] = False
-                    payload["reason"] = None
-                    payload["model_version"] = result["model_version"]
-                    payload["generated_at"] = None
-                    payload["model_notes"] = (
-                        f"λ_home={result['lambda_home']}, λ_away={result['lambda_away']}, "
-                        f"league_avg={result['league_avg']}"
-                    )
-                except Exception as e:
-                    import logging
-                    logging.getLogger(__name__).warning("poisson prediction failed: %s", e)
+                    return float(v) / 100.0
+                except (TypeError, ValueError):
+                    return None
 
-        # ── Step 3: fall back to market consensus from odds ─────────────────
-        if payload["unavailable"]:
-            odds_data = bsd_get(f"/events/{match.provider_match_id}/odds/")
-            if odds_data and isinstance(odds_data, dict) and odds_data.get("odds"):
-                from analysis.poisson import predict_from_odds
-                odds_payload = predict_from_odds(odds_data["odds"])
-                if odds_payload:
-                    payload["markets"]["1x2"] = {
-                        "home": odds_payload["home"],
-                        "draw": odds_payload["draw"],
-                        "away": odds_payload["away"],
-                    }
-                    payload["unavailable"] = False
-                    payload["reason"] = None
-                    payload["model_version"] = odds_payload["model_version"]
-                    payload["generated_at"] = odds_data.get("last_update_at")
+            model = {
+                "home": pct(mr.get("prob_home")),
+                "draw": pct(mr.get("prob_draw")),
+                "away": pct(mr.get("prob_away")),
+                "over_25": pct(ou.get("prob_over_25")),
+                "btts_yes": pct(btts.get("prob_yes")),
+                "xg_home": eg.get("home"),
+                "xg_away": eg.get("away"),
+                "confidence": (prediction.get("model") or {}).get("confidence"),
+                "version": (prediction.get("model") or {}).get("version") or "v1",
+            }
 
-        # ── Step 4: still empty? Tell the operator why ──────────────────────
-        if payload["unavailable"]:
-            # Prefer Bzzoiro's own reason if it returned one
-            if isinstance(bsd_model, dict) and bsd_model.get("detail"):
-                payload["reason"] = bsd_model["detail"]
-            else:
-                payload["reason"] = (
-                    "Not enough recent match data or market odds "
-                    "to build a prediction for this fixture."
-                )
-                
+            if model["home"] is not None and model["draw"] is not None and model["away"] is not None:
+                payload["model"] = model
+                payload["prediction_available"] = True
+
+        # --- CONSENSUS ODDS (decimal → implied probability) ---
+        if odds and isinstance(odds, dict):
+            def odds_to_prob(decimal):
+                if decimal is None or float(decimal) <= 1.0:
+                    return None
+                return 1.0 / float(decimal)
+
+            h = odds_to_prob(odds.get("home_win"))
+            d = odds_to_prob(odds.get("draw"))
+            a = odds_to_prob(odds.get("away_win"))
+
+            if h is not None and d is not None and a is not None:
+                # Normalise so probabilities sum to 1 (removes bookmaker overround)
+                total = h + d + a
+                market = {
+                    "home": h / total,
+                    "draw": d / total,
+                    "away": a / total,
+                    "over_25": odds_to_prob(odds.get("over_25_goals")),
+                    "btts_yes": odds_to_prob(odds.get("btts_yes")),
+                }
+                payload["market"] = market
+                payload["odds_available"] = True
+
+        if not payload["prediction_available"] and not payload["odds_available"]:
+            payload["unavailable"] = True
+            payload["reason"] = "No prediction or odds data for this fixture."
+        else:
+            payload["unavailable"] = False   
+          
+    # --- odds_board ---
+    elif card_type == "odds_board":
+        data = bsd_get(f"/events/{match.provider_match_id}/odds/")
+        odds = data.get("odds") if isinstance(data, dict) else None
+
+        payload = {
+            "competition": base["competition"],
+            "home_name": base["home"]["name"],
+            "away_name": base["away"]["name"],
+            "home_short": match.home_team_short,
+            "away_short": match.away_team_short,
+            "home_color": base["home"]["color"],
+            "away_color": base["away"]["color"],
+            "markets": {},
+            "last_update": None,
+            "unavailable": True,
+        }
+        title = f"Odds · {match.home_team_short} vs {match.away_team_short}"
+
+        if odds and isinstance(odds, dict):
+            # Helper to safely extract and convert odds
+            def dec(k):
+                v = odds.get(k)
+                return float(v) if v is not None else None
+
+            markets = {}
+
+            # 1X2
+            if dec("home_win") and dec("draw") and dec("away_win"):
+                markets["1x2"] = {
+                    "home": dec("home_win"),
+                    "draw": dec("draw"),
+                    "away": dec("away_win"),
+                }
+
+            # Double Chance
+            if dec("home_or_draw") and dec("home_or_away") and dec("draw_or_away"):
+                markets["double_chance"] = {
+                    "1X": dec("home_or_draw"),
+                    "12": dec("home_or_away"),
+                    "X2": dec("draw_or_away"),
+                }
+
+            # Total Goals
+            totals = {}
+            for line in ["15", "25", "35"]:
+                if dec(f"over_{line}_goals") or dec(f"under_{line}_goals"):
+                    totals[f"{line[0]}.{line[1]}"] = {
+                        "over": dec(f"over_{line}_goals"),
+                        "under": dec(f"under_{line}_goals"),
+                    }
+            if totals:
+                markets["totals"] = totals
+
+            # BTTS
+            if dec("btts_yes") and dec("btts_no"):
+                markets["btts"] = {
+                    "yes": dec("btts_yes"),
+                    "no": dec("btts_no"),
+                }
+
+            payload["markets"] = markets
+            payload["last_update"] = data.get("last_update_at")
+            payload["unavailable"] = len(markets) == 0
+                      
     # --- momentum ---
     elif card_type == "momentum":
         data = bsd_get(f"/events/{match.provider_match_id}/stats/")
@@ -1171,7 +1230,293 @@ def seed_editorial(request, session_id, card_type):
             if away_xg is not None:
                 payload["away_xg"] = round(float(away_xg), 2)
             
-            
+    # --- player_stats ---
+    elif card_type == "player_stats":
+        data = bsd_get(f"/events/{match.provider_match_id}/player-stats/")
+        lineup_data = bsd_get(f"/events/{match.provider_match_id}/lineups/")
+
+        payload = {
+            "competition": base["competition"],
+            "home_name": base["home"]["name"],
+            "away_name": base["away"]["name"],
+            "home_short": match.home_team_short,
+            "away_short": match.away_team_short,
+            "home_color": base["home"]["color"],
+            "away_color": base["away"]["color"],
+            "players": [],
+            "all_players": [],
+            "selected_player_ids": [],
+            "unavailable": True,
+        }
+        title = f"Player ratings · {match.home_team_short} vs {match.away_team_short}"
+
+        requested_ids = request.data.get("player_ids") if isinstance(request.data, dict) else None
+        if isinstance(requested_ids, list) and requested_ids:
+            payload["selected_player_ids"] = [str(i) for i in requested_ids]
+
+        # 1. Build a bulletproof lookup from the LIVE Bzzoiro lineups endpoint.
+        # This includes both starters and the bench (subs).
+        players_by_id: dict[str, str] = {}
+        if lineup_data and isinstance(lineup_data, dict) and lineup_data.get("lineups"):
+            lu = lineup_data["lineups"]
+            for side in ("home", "away"):
+                side_data = lu.get(side) or {}
+                for p in (side_data.get("players") or []):
+                    pid = p.get("id") or p.get("player_id")
+                    name = p.get("name") or p.get("player_name") or p.get("short_name")
+                    if pid is not None and name:
+                        players_by_id[str(pid)] = name
+                # Include bench players too
+                for p in (side_data.get("substitutes") or []):
+                    pid = p.get("id") or p.get("player_id")
+                    name = p.get("name") or p.get("player_name") or p.get("short_name")
+                    if pid is not None and name:
+                        players_by_id[str(pid)] = name
+
+        def num(p, *keys, default=0):
+            for k in keys:
+                v = p.get(k)
+                if v is not None:
+                    try:
+                        return float(v)
+                    except (TypeError, ValueError):
+                        continue
+            return default
+
+        if data and isinstance(data, dict):
+            raw = data.get("player_stats") or data.get("players") or []
+            if not isinstance(raw, list):
+                raw = []
+
+            all_rows: list[dict] = []
+
+            for p in raw:
+                if not isinstance(p, dict):
+                    continue
+
+                minutes = int(num(p, "minutes_played"))
+                if minutes == 0:
+                    continue
+
+                player_id_raw = p.get("player_id") or p.get("id")
+                player_id = str(player_id_raw) if player_id_raw is not None else None
+
+                # Look up name from the merged starters + bench list
+                name = players_by_id.get(player_id or "") or p.get("name") or p.get("player_name")
+                
+                # If still missing, fallback to jersey number if available, else ID
+                if not name:
+                    shirt = p.get("shirt_number") or p.get("jersey_number")
+                    name = f"#{shirt}" if shirt else f"#{player_id_raw}"
+
+                team_id = str(p.get("team_id") or "")
+                is_home = team_id == str(match.home_team_id)
+
+                total_pass = int(num(p, "total_pass"))
+                accurate_pass = int(num(p, "accurate_pass"))
+                pass_accuracy = (accurate_pass / total_pass) if total_pass > 0 else None
+
+                all_rows.append({
+                    "player_id": player_id,
+                    "name": name,
+                    "team": "home" if is_home else "away",
+                    "team_name": base["home"]["name"] if is_home else base["away"]["name"],
+                    "team_short": match.home_team_short if is_home else match.away_team_short,
+                    "team_color": base["home"]["color"] if is_home else base["away"]["color"],
+                    "minutes": minutes,
+                    "rating": p.get("rating"),
+                    "goals": int(num(p, "goals")),
+                    "assists": int(num(p, "goal_assist", "assists")),
+                    "shots": int(num(p, "total_shots", "shots")),
+                    "passes": total_pass,
+                    "pass_accuracy": pass_accuracy,
+                    "tackles": int(num(p, "total_tackle")),
+                    "interceptions": int(num(p, "interception")),
+                    "xg": num(p, "expected_goals") or None,
+                    "carries": int(num(p, "ball_carries_count")),
+                })
+
+            all_rows.sort(key=lambda x: (-(float(x["rating"]) if x["rating"] is not None else 0), -x["minutes"]))
+
+            if payload["selected_player_ids"]:
+                sel = set(payload["selected_player_ids"])
+                payload["players"] = [r for r in all_rows if r["player_id"] in sel]
+            else:
+                payload["players"] = all_rows
+
+            payload["all_players"] = all_rows
+            payload["unavailable"] = not bool(payload["players"])
+             
+    # --- match_stats ---
+    elif card_type == "match_stats":
+        data = bsd_get(f"/events/{match.provider_match_id}/stats/")
+        
+        # Fetch score from snapshot (or default to 0-0)
+        snap = getattr(match, "snapshot", None)
+        score = {
+            "home": snap.score_home if snap else 0,
+            "away": snap.score_away if snap else 0,
+        }
+
+        payload = {
+            "competition": base["competition"],
+            "home_name": base["home"]["name"],
+            "away_name": base["away"]["name"],
+            "home_short": match.home_team_short,
+            "away_short": match.away_team_short,
+            "home_color": base["home"]["color"],
+            "away_color": base["away"]["color"],
+            "score": score, # <-- Added
+            "stats": [],
+            "unavailable": True,
+        }
+        title = f"Stats · {match.home_team_short} vs {match.away_team_short}"
+
+        if data and isinstance(data, dict):
+            stats_block = data.get("stats") or {}
+            home_stats = stats_block.get("home") or {}
+            away_stats = stats_block.get("away") or {}
+
+            # (key, label, format, higher_is_better)
+            STAT_ROWS = [
+                ("ball_possession",  "Possession",  "percent", True),
+                ("expected_goals",   "xG",          "decimal", True),
+                ("total_shots",      "Shots",       "int",     True),
+                ("shots_on_target",  "On target",   "int",     True),
+                ("corner_kicks",     "Corners",     "int",     True),
+                ("fouls",            "Fouls",       "int",     None),
+                ("yellow_cards",     "Yellow",      "int",     None),
+                ("offsides",         "Offsides",    "int",     None),
+            ]
+
+            def parse_num(v):
+                if v is None:
+                    return 0.0
+                try:
+                    return float(v)
+                except (TypeError, ValueError):
+                    return 0.0
+
+            rows = []
+            for key, label, fmt, higher_is_better in STAT_ROWS:
+                hv = home_stats.get(key)
+                av = away_stats.get(key)
+                if hv is None and av is None:
+                    continue
+                rows.append({
+                    "key": key,
+                    "label": label,
+                    "format": fmt,
+                    "home": parse_num(hv),
+                    "away": parse_num(av),
+                    "higher_is_better": higher_is_better,
+                })
+
+            if rows:
+                payload["stats"] = rows
+                payload["unavailable"] = False    
+        
+    # --- xg_race ---
+    elif card_type == "xg_race":
+        data = bsd_get(f"/events/{match.provider_match_id}/stats/")
+
+        payload = {
+            "competition": base["competition"],
+            "home_name": base["home"]["name"],
+            "away_name": base["away"]["name"],
+            "home_short": match.home_team_short,
+            "away_short": match.away_team_short,
+            "home_color": base["home"]["color"],
+            "away_color": base["away"]["color"],
+            "samples": [],
+            "home_xg_final": None,
+            "away_xg_final": None,
+            "unavailable": True,
+        }
+        title = f"xG race · {match.home_team_short} vs {match.away_team_short}"
+
+        if data and isinstance(data, dict):
+            raw = data.get("xg_per_minute") or []
+            if isinstance(raw, list) and raw:
+                samples = []
+                for point in raw:
+                    if not isinstance(point, dict):
+                        continue
+                    minute = point.get("m") or point.get("minute")
+                    cum_h = point.get("cum_home")
+                    cum_a = point.get("cum_away")
+                    if minute is None:
+                        continue
+                    try:
+                        samples.append({
+                            "minute": int(minute),
+                            "home": float(cum_h) if cum_h is not None else 0.0,
+                            "away": float(cum_a) if cum_a is not None else 0.0,
+                            "estimated": bool(point.get("estimated", False)),
+                        })
+                    except (TypeError, ValueError):
+                        continue
+
+                if samples:
+                    samples.sort(key=lambda s: s["minute"])
+                    payload["samples"] = samples
+                    payload["home_xg_final"] = round(samples[-1]["home"], 2)
+                    payload["away_xg_final"] = round(samples[-1]["away"], 2)
+                    payload["unavailable"] = False
+         
+    # --- average_positions ---
+    elif card_type == "average_positions":
+        data = bsd_get(f"/events/{match.provider_match_id}/stats/")
+
+        payload = {
+            "competition": base["competition"],
+            "home_name": base["home"]["name"],
+            "away_name": base["away"]["name"],
+            "home_short": match.home_team_short,
+            "away_short": match.away_team_short,
+            "home_color": base["home"]["color"],
+            "away_color": base["away"]["color"],
+            "home_positions": [],
+            "away_positions": [],
+            "unavailable": True,
+        }
+        title = f"Average positions · {match.home_team_short} vs {match.away_team_short}"
+
+        if data and isinstance(data, dict):
+            raw_avg = data.get("average_positions") or {}
+            if isinstance(raw_avg, dict):
+                def parse_side(side_data, team_id):
+                    if not isinstance(side_data, list):
+                        return []
+                    out = []
+                    for p in side_data:
+                        if not isinstance(p, dict):
+                            continue
+                        x = p.get("x")
+                        y = p.get("y")
+                        if x is None or y is None:
+                            continue
+                        try:
+                            out.append({
+                                "player_id": str(p.get("player_id") or ""),
+                                "name": p.get("name") or "",
+                                "pos": p.get("pos") or "",     # "GK", "D", "M", "F"
+                                "x": float(x),
+                                "y": float(y),
+                                "n": int(p.get("n") or 0),     # touches the average is based on
+                            })
+                        except (TypeError, ValueError):
+                            continue
+                    return out
+
+                home_side = parse_side(raw_avg.get("home"), match.home_team_id)
+                away_side = parse_side(raw_avg.get("away"), match.away_team_id)
+
+                if home_side or away_side:
+                    payload["home_positions"] = home_side
+                    payload["away_positions"] = away_side
+                    payload["unavailable"] = False
+               
     # --- match_preview ---
     elif card_type == "match_preview":
         # Two sources of data on Bzzoiro:
@@ -1276,6 +1621,67 @@ def seed_editorial(request, session_id, card_type):
         # Fallback: at least show something useful if only one source worked
         if payload["unavailable"] and not payload["preview"] and not payload["venue"]:
             payload["unavailable"] = True
+            
+    # --- broadcasts ---
+    elif card_type == "broadcasts":
+        data = bsd_get(f"/events/{match.provider_match_id}/broadcasts/")
+
+        payload = {
+            "competition": base["competition"],
+            "home_name": base["home"]["name"],
+            "away_name": base["away"]["name"],
+            "home_short": match.home_team_short,
+            "away_short": match.away_team_short,
+            "home_color": base["home"]["color"],
+            "away_color": base["away"]["color"],
+            "kickoff_label": match.kickoff.strftime("Kickoff · %a %H:%M") if match.kickoff else "",
+            "by_country": {},
+            "unavailable": True,
+        }
+        title = f"Where to watch · {match.home_team_short} vs {match.away_team_short}"
+
+        if data and isinstance(data, dict):
+            # Bzzoiro returns a flat list under "results"
+            raw = data.get("results") or data.get("broadcasts") or data.get("channels") or []
+            if not isinstance(raw, list):
+                raw = []
+
+            grouped = {}
+
+            for entry in raw:
+                if not isinstance(entry, dict):
+                    continue
+
+                country_code = (entry.get("country_code") or "").upper()
+                channel_name = entry.get("channel_name") or ""
+
+                if not country_code or not channel_name:
+                    continue
+
+                if country_code not in grouped:
+                    # Simple mapping for common codes to make the card look professional
+                    country_names = {
+                        "GB": "United Kingdom", "US": "United States", "AE": "UAE",
+                        "AO": "Angola", "SA": "Saudi Arabia", "ZA": "South Africa",
+                        "FR": "France", "DE": "Germany", "ES": "Spain", "IT": "Italy",
+                    }
+                    grouped[country_code] = {
+                        "country_code": country_code,
+                        "country_name": country_names.get(country_code, country_code),
+                        "channels": [],
+                    }
+                
+                # Avoid duplicate channels for the same country
+                if not any(c["name"] == channel_name for c in grouped[country_code]["channels"]):
+                    grouped[country_code]["channels"].append({
+                        "name": channel_name,
+                        "type": "tv", # Bzzoiro doesn't specify type, assume TV
+                    })
+
+            # Sort countries alphabetically
+            sorted_countries = sorted(grouped.values(), key=lambda c: c["country_name"])
+            payload["by_country"] = {c["country_code"]: c for c in sorted_countries}
+            payload["unavailable"] = len(sorted_countries) == 0
             
     # --- custom / unknown ---
     else:

@@ -76,3 +76,10 @@ class SessionConsumer(AsyncWebsocketConsumer):
             "data": event["data"],
         }))
         
+    async def system_alert(self, event):
+        await self.send(text_data=json.dumps({
+            "type": "system.alert",
+            "data": event["data"],
+        }))
+        
+        

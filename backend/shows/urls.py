@@ -23,6 +23,12 @@ urlpatterns = [
         views.live_scores,
         name="show-sessions-live-scores",
     ),
+    
+    path(
+        "show-sessions/<uuid:session_id>/player-stats-list",
+        views.match_player_stats_list,
+        name="show-sessions-player-stats-list",
+    ),
     # Only match known transition targets — no wildcard.
     # This prevents /commentary, /log, etc. from being swallowed.
     re_path(
