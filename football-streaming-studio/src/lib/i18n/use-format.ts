@@ -16,6 +16,8 @@ export function useFormat() {
       day: (iso: string | Date, long = true) => F.formatDay(iso, p, t, long),
       ago: (iso: string) => F.timeAgo(iso, t),
       countdown: (s: number) => F.formatCountdown(s, t),
+      chip: (d: Date) => F.chipParts(d, p),
+      month: (d: Date) => F.monthName(d, p),
     };
   }, [lang, ethCalendar, ethClock, t]);
 }

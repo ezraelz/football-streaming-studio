@@ -9,13 +9,19 @@ import { focusRing } from "@/components/ui/button";
 import { useT } from "@/lib/i18n";
 import { LanguageSwitch, ThemeSwitch } from "@/components/ui/prefs";
 
-const NAV = [
-  { href: "/", key: "nav.matches", icon: CalendarDays, exact: true },
-  { href: "/shows", key: "nav.shows", icon: Clapperboard },
-  { href: "/settings", key: "nav.settings", icon: Settings },
+// Grouped the way a producer works: pick the match, then set up the show.
+const NAV_GROUPS = [
+  { label: "nav.group.broadcast", items: [{ href: "/", key: "nav.matches", icon: CalendarDays, exact: true }] },
+  {
+    label: "nav.group.setup",
+    items: [
+      { href: "/shows", key: "nav.shows", icon: Clapperboard, exact: false },
+      { href: "/settings", key: "nav.settings", icon: Settings, exact: false },
+    ],
+  },
 ] as const;
 
-export function Sidebar() {
+export function Sidebar({ width = 248 }: { width?: number }) {
   const pathname = usePathname();
   const router = useRouter();
   const t = useT();
@@ -30,13 +36,13 @@ export function Sidebar() {
   };
 
   return (
-    <aside className="flex h-full w-60 flex-col border-r border-zinc-800 bg-zinc-900">
-      <div className="flex items-center gap-3 border-b border-zinc-800 px-4 py-4">
-        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-600 text-white" aria-hidden>
+    <aside className="flex h-full max-w-full flex-col border-r border-zinc-800 bg-zinc-900" style={{ width }}>
+      <div className="pitch-stripes flex items-center gap-3 border-b border-zinc-800 bg-gradient-to-br from-emerald-950 to-zinc-900 px-4 py-4">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-600 text-white ring-2 ring-white/30" aria-hidden>
           <Tv2 className="h-5 w-5" />
         </div>
         <div className="leading-tight">
-          <div className="text-sm font-semibold text-zinc-50">{t("app.name")}</div>
+          <div className="font-display text-lg font-bold uppercase tracking-wide text-zinc-50">{t("app.name")}</div>
           <div className="text-xs text-zinc-400">{t("app.tagline")}</div>
         </div>
       </div>
@@ -69,28 +75,33 @@ export function Sidebar() {
         </div>
       )}
 
-      <nav aria-label={t("nav.main")} className="flex-1 space-y-1 p-3">
-        {NAV.map(({ href, key, icon: Icon, ...rest }) => {
-          const exact = "exact" in rest ? rest.exact : false;
-          const active = exact ? pathname === href : pathname.startsWith(href);
-          return (
-            <Link
-              key={href}
-              href={href}
-              aria-current={active ? "page" : undefined}
-              className={cn(
-                "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
-                focusRing,
-                active
-                  ? "bg-zinc-800 text-zinc-50"
-                  : "text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-100",
-              )}
-            >
-              <Icon className={cn("h-4 w-4", active && "text-emerald-400")} aria-hidden />
-              {t(key)}
-            </Link>
-          );
-        })}
+      <nav aria-label={t("nav.main")} className="flex-1 space-y-4 overflow-y-auto p-3">
+        {NAV_GROUPS.map((group) => (
+          <div key={group.label}>
+            <div className="mb-1 px-3 font-display text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500">{t(group.label)}</div>
+            <div className="space-y-1">
+              {group.items.map(({ href, key, icon: Icon, exact }) => {
+                const active = exact ? pathname === href : pathname.startsWith(href);
+                return (
+                  <Link
+                    key={href}
+                    href={href}
+                    aria-current={active ? "page" : undefined}
+                    className={cn(
+                      "relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                      focusRing,
+                      active ? "bg-emerald-600/15 text-zinc-50" : "text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-100",
+                    )}
+                  >
+                    {active && <span className="absolute inset-y-1.5 left-0 w-1 rounded-r bg-emerald-500" aria-hidden />}
+                    <Icon className={cn("h-4 w-4", active && "text-emerald-400")} aria-hidden />
+                    <span className="truncate">{t(key)}</span>
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+        ))}
       </nav>
 
       <div className="space-y-2 border-t border-zinc-800 p-3">

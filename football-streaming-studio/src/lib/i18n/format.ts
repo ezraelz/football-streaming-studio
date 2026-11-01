@@ -62,3 +62,23 @@ export function formatCountdown(seconds: number, t: TFn): string {
   if (seconds < 60) return `${seconds}s`;
   return `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, "0")}s`;
 }
+
+/** Short weekday + day-of-month for date chips (Gregorian or Ethiopian calendar). */
+export function chipParts(d: Date, p: FormatPrefs): { weekday: string; day: string; month: string } {
+  const base = locale(p.lang);
+  const tag = p.ethCalendar ? `${base}-u-ca-ethiopic` : `${base}-u-ca-gregory`;
+  try {
+    const parts = new Intl.DateTimeFormat(tag, { weekday: "short", day: "numeric", month: "short" }).formatToParts(d);
+    const get = (type: string) => parts.find((x) => x.type === type)?.value ?? "";
+    return { weekday: get("weekday"), day: get("day"), month: get("month") };
+  } catch {
+    return { weekday: d.toLocaleDateString(base, { weekday: "short" }), day: String(d.getDate()), month: d.toLocaleDateString(base, { month: "short" }) };
+  }
+}
+
+export function monthName(d: Date, p: FormatPrefs): string {
+  const base = locale(p.lang);
+  const tag = p.ethCalendar ? `${base}-u-ca-ethiopic` : `${base}-u-ca-gregory`;
+  try { return new Intl.DateTimeFormat(tag, { month: "long", year: "numeric" }).format(d); }
+  catch { return d.toLocaleDateString(base, { month: "long", year: "numeric" }); }
+}

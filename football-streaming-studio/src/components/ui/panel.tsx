@@ -23,9 +23,9 @@ export function Panel({
       )}
     >
       {(title || actions) && (
-        <header className="flex min-h-12 items-center justify-between gap-3 border-b border-zinc-800/80 px-4 py-2.5">
-          <h2 className="flex items-center gap-2 text-sm font-semibold text-zinc-100">
-            {icon && <span className="text-zinc-400" aria-hidden>{icon}</span>}
+        <header className="flex min-h-12 items-center justify-between gap-3 border-b border-zinc-800/80 border-l-4 border-l-emerald-600 px-4 py-2.5">
+          <h2 className="flex items-center gap-2 font-display text-base font-bold uppercase tracking-wide text-zinc-100">
+            {icon && <span className="text-emerald-500" aria-hidden>{icon}</span>}
             {title}
           </h2>
           {actions && <div className="flex items-center gap-1.5">{actions}</div>}
@@ -39,7 +39,7 @@ export function Panel({
 /** Small uppercase label for sub-groups inside a panel. */
 export function SectionLabel({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <h3 className={cn("mb-2 text-xs font-semibold uppercase tracking-wider text-zinc-400", className)}>
+    <h3 className={cn("mb-2 font-display text-sm font-bold uppercase tracking-[0.14em] text-zinc-400", className)}>
       {children}
     </h3>
   );

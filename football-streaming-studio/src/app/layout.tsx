@@ -1,10 +1,12 @@
 import type { Metadata } from "next";
-import { Inter, Noto_Sans_Ethiopic } from "next/font/google";
+import { Barlow_Condensed, Inter, Noto_Sans_Ethiopic } from "next/font/google";
 import "./globals.css";
 import { I18nProvider } from "@/lib/i18n";
 import { ThemeProvider, THEME_BOOT_SCRIPT } from "@/lib/theme";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
+// Condensed scoreboard face used by the broadcast overlay and football-style headings.
+const display = Barlow_Condensed({ subsets: ["latin"], variable: "--font-display-latin", weight: ["500", "600", "700", "800"], display: "swap" });
 // Ge'ez script for Amharic. Falls back to Nyala / Abyssinica SIL if the font can't be downloaded.
 const ethiopic = Noto_Sans_Ethiopic({
   subsets: ["ethiopic"],
@@ -21,7 +23,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     // data-theme / lang are set by the boot script before paint, hence suppressHydrationWarning.
-    <html lang="en" data-theme="dark" suppressHydrationWarning className={`${inter.variable} ${ethiopic.variable}`}>
+    <html lang="en" data-theme="dark" suppressHydrationWarning className={`${inter.variable} ${display.variable} ${ethiopic.variable}`}>
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_BOOT_SCRIPT }} />
       </head>

@@ -9,12 +9,14 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Alert, EmptyState, Skeleton } from "@/components/ui/feedback";
 import { Switch, inputClass } from "@/components/ui/form";
 import { cn } from "@/lib/utility/utils";
+import { useT, type MsgKey } from "@/lib/i18n";
 import { focusRing } from "@/components/ui/button";
 
 type Kind = "all" | "data" | "commentary" | "scene" | "override" | "error";
 const KINDS: Kind[] = ["all", "data", "commentary", "scene", "override", "error"];
 
 export function LogContent() {
+  const t = useT();
   const params = useParams<{ sessionId: string }>();
   const [entries, setEntries] = useState<LogEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -26,7 +28,7 @@ export function LogContent() {
   useEffect(() => {
     api.sessionLog(params.sessionId)
       .then((data) => { setEntries(data); setError(null); })
-      .catch((e) => setError(e instanceof Error ? e.message : "Failed to load log"))
+      .catch((e) => setError(e instanceof Error ? e.message : t("log.err.load")))
       .finally(() => setLoading(false));
   }, [params.sessionId]);
 
@@ -55,26 +57,26 @@ export function LogContent() {
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-5">
       <PageHeader
-        title="Show log"
-        description="A permanent record of everything that happened in this show. New lines appear at the top as they happen."
+        title={t("tabs.log")}
+        description={t("log.description")}
       />
 
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
-        <div role="group" aria-label="Filter by type" className="flex flex-wrap gap-1.5">
+        <div role="group" aria-label={t("log.filter")} className="flex flex-wrap gap-1.5">
           {KINDS.map((k) => (
             <button
               key={k}
               onClick={() => setKind(k)}
               aria-pressed={kind === k}
               className={cn(
-                "rounded-full border px-3 py-1.5 text-sm font-medium capitalize transition-colors",
+                "rounded-full border px-3 py-1.5 text-sm font-medium transition-colors",
                 focusRing,
                 kind === k
                   ? "border-emerald-600 bg-emerald-600/15 text-emerald-200"
                   : "border-zinc-800 bg-zinc-900 text-zinc-300 hover:border-zinc-600",
               )}
             >
-              {k}
+              {t(`log.kind.${k}` as MsgKey)}
               <span className="ml-1.5 tabular-nums text-zinc-400">{counts[k] ?? 0}</span>
             </button>
           ))}
@@ -82,17 +84,17 @@ export function LogContent() {
 
         <div className="flex flex-wrap items-center gap-4 lg:ml-auto">
           <label className="flex items-center gap-2 text-sm text-zinc-300">
-            <Switch checked={onlyProblems} onChange={setOnlyProblems} label="Only warnings and errors" />
-            Problems only <span className="tabular-nums text-zinc-400">({problems})</span>
+            <Switch checked={onlyProblems} onChange={setOnlyProblems} label={t("log.onlyProblems")} />
+            {t("log.problems")} <span className="tabular-nums text-zinc-400">({problems})</span>
           </label>
           <div className="relative w-full sm:w-60">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" aria-hidden />
             <input
               type="search"
-              aria-label="Search log messages"
+              aria-label={t("log.search")}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search messages…"
+              placeholder={t("log.search")}
               className={cn(inputClass, "pl-9")}
             />
           </div>
@@ -108,8 +110,8 @@ export function LogContent() {
       ) : filtered.length === 0 ? (
         <EmptyState
           icon={<ScrollText className="h-6 w-6" />}
-          title={filtersActive ? "No entries match these filters" : "Nothing logged yet"}
-          description={filtersActive ? "Try a different type or clear the search." : "Events, scene changes and commentary will be recorded here."}
+          title={filtersActive ? t("log.emptyFiltered") : t("log.emptyTitle")}
+          description={filtersActive ? t("matches.empty.tryOther") : t("log.emptyBody")}
         />
       ) : (
         <ul className="flex flex-col gap-1.5" aria-live="polite">

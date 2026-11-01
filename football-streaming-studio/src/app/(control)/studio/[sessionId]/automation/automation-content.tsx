@@ -8,10 +8,12 @@ import { useShowStore } from "@/lib/stores/show-store";
 import { ControllerStateBar } from "@/components/control/controller-state-bar";
 import { AutomationRuleCard } from "@/components/control/automation-rule-card";
 import { PageHeader } from "@/components/ui/page-header";
+import { useT } from "@/lib/i18n";
 import { Alert, EmptyState, Skeleton } from "@/components/ui/feedback";
 import { Button } from "@/components/ui/button";
 
 export function AutomationContent() {
+  const t = useT();
   const params = useParams<{ sessionId: string }>();
   const setSession = useShowStore((s) => s.setSession);
 
@@ -91,7 +93,7 @@ export function AutomationContent() {
       await api.deleteAutomationRule(id);
       setRules((prev) => prev.filter((r) => r.id !== id));
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Delete failed");
+      setError(e instanceof Error ? e.message : t("prof.err.delete"));
     }
   };
 
@@ -100,8 +102,8 @@ export function AutomationContent() {
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-6">
       <PageHeader
-        title="Automation"
-        description="Rules that run on their own when a matching event lands during a live show."
+        title={t("tabs.automation")}
+        description={t("auto.description")}
       />
 
       <ControllerStateBar />
@@ -112,16 +114,16 @@ export function AutomationContent() {
       )}
 
       <Alert tone="info">
-        <strong className="font-semibold">Rules, not AI judgement.</strong>{" "}
-        The backend only does what you configure here, and records every action with its rule, event and outcome.
+        <strong className="font-semibold">{t("auto.rulesNotAi")}</strong>{" "}
+        {t("auto.rulesNotAiBody")}
       </Alert>
 
       <div className="flex items-center justify-between gap-3">
-        <h2 className="text-sm font-semibold text-zinc-100">
-          Rules{!loading && <span className="ml-2 font-normal text-zinc-400">{enabled} of {rules.length} on</span>}
+        <h2 className="font-display text-base font-bold uppercase tracking-wide text-zinc-100">
+          {t("auto.rules")}{!loading && <span className="ml-2 font-sans text-sm font-normal normal-case text-zinc-400">{t("auto.onCount", { a: enabled, b: rules.length })}</span>}
         </h2>
         <Button variant="primary" onClick={addRule} loading={adding} disabled={!profileId}>
-          {!adding && <Plus className="h-4 w-4" aria-hidden />} New rule
+          {!adding && <Plus className="h-4 w-4" aria-hidden />} {t("auto.new")}
         </Button>
       </div>
 
@@ -132,9 +134,9 @@ export function AutomationContent() {
       ) : rules.length === 0 ? (
         <EmptyState
           icon={<Workflow className="h-6 w-6" />}
-          title="No automation rules yet"
-          description="Create a rule to switch scenes or draft commentary automatically — for example, show the scoreboard on every confirmed goal."
-          action={<Button variant="primary" onClick={addRule} disabled={!profileId}><Plus className="h-4 w-4" aria-hidden /> Create the first rule</Button>}
+          title={t("auto.emptyTitle")}
+          description={t("auto.emptyBody")}
+          action={<Button variant="primary" onClick={addRule} disabled={!profileId}><Plus className="h-4 w-4" aria-hidden /> {t("auto.createFirst")}</Button>}
         />
       ) : (
         <div className="flex flex-col gap-3">

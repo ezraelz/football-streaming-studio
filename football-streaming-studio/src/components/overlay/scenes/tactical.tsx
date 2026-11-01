@@ -87,10 +87,12 @@ export function TacticalScene({
             x={cx}
             y={cy + 28}
             textAnchor="middle"
-            fontSize="10"
-            fontWeight="600"
+            fontSize="11.5"
+            fontWeight="700"
             fill="white"
-            style={{ opacity: 0.9, textShadow: "0 1px 2px rgba(0,0,0,0.8)" }}
+            stroke="rgba(0,0,0,.65)"
+            strokeWidth="2.6"
+            paintOrder="stroke"
           >
             {shortName}
           </text>
@@ -99,30 +101,31 @@ export function TacticalScene({
     );
   };
 
+  const stripes = Array.from({ length: 10 }, (_, i) => i);
   return (
     <OverlayPanel
-      title={`${t("ov.tactical")} · ${snapshot.home.shortName} – ${snapshot.away.shortName}`}
+      title={`${t("ov.tactical")}`}
       competition={snapshot.competition}
-      className="left-1/2 top-[18%] w-[1100px] -translate-x-1/2"
+      className="left-1/2 top-[17%] w-[1180px] -translate-x-1/2"
     >
-      <div className="mb-3 flex items-center justify-between text-[24px] font-extrabold text-white">
-        <span className="flex items-center gap-2">
-          <i className="inline-block h-4 w-4 rounded-full" style={{ background: snapshot.home.color }} />
+      <div className="mb-3 flex items-center justify-between text-[30px] font-extrabold uppercase text-white">
+        <span className="flex items-center gap-3">
+          <i className="inline-block h-6 w-6 -skew-x-12" style={{ background: snapshot.home.color }} />
           {localTeamName(snapshot.home.name, lang)}
-          <span className="text-white/50" style={{ fontSize: "0.8em" }}>
-            {formationLabel(lineups?.home)}
-          </span>
+          <span className="font-bold text-white/55" style={{ fontSize: "0.8em" }}>{formationLabel(lineups?.home)}</span>
         </span>
-        <span className="flex items-center gap-2">
-          <span className="text-white/50" style={{ fontSize: "0.8em" }}>
-            {formationLabel(lineups?.away)}
-          </span>
+        <span className="flex items-center gap-3">
+          <span className="font-bold text-white/55" style={{ fontSize: "0.8em" }}>{formationLabel(lineups?.away)}</span>
           {localTeamName(snapshot.away.name, lang)}
-          <i className="inline-block h-4 w-4 rounded-full" style={{ background: snapshot.away.color }} />
+          <i className="inline-block h-6 w-6 -skew-x-12" style={{ background: snapshot.away.color }} />
         </span>
       </div>
 
-      <svg viewBox="0 0 680 420" className="w-full rounded-2xl" style={{ background: "var(--ov-pitch)" }}>
+      <svg viewBox="0 0 680 420" className="w-full" style={{ background: "var(--ov-pitch)" }}>
+        {/* mown grass bands */}
+        {stripes.map((i) => (
+          <rect key={i} x={6 + i * 66.8} y="6" width="66.8" height="408" fill={i % 2 ? "rgb(255 255 255 / 0.05)" : "transparent"} />
+        ))}
         {/* Pitch markings */}
         <rect x="6" y="6" width="668" height="408" {...line} />
         <line x1="340" y1="6" x2="340" y2="414" {...line} />
@@ -132,15 +135,13 @@ export function TacticalScene({
         <rect x="6" y="160" width="36" height="100" {...line} />
         <rect x="578" y="110" width="96" height="200" {...line} />
         <rect x="638" y="160" width="36" height="100" {...line} />
+        <path d="M102 180a46 46 0 0 1 0 60M578 180a46 46 0 0 0 0 60" {...line} />
 
-        {/* Home players */}
         {homePlacement.map((p, i) => renderPlayer(p, snapshot.home.color, "h", i))}
-
-        {/* Away players */}
         {awayPlacement.map((p, i) => renderPlayer(p, snapshot.away.color, "a", i))}
       </svg>
 
-      <div className="mt-3 text-[18px] text-white/55">{t("ov.tacticalNote")}</div>
+      <div className="mt-3 text-[20px] font-medium text-white/55">{t("ov.tacticalNote")}</div>
     </OverlayPanel>
   );
 }

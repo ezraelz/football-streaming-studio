@@ -1,69 +1,70 @@
 """
 Bzzoiro Sports Data (BSD) provider adapter — v2 API.
-
-Docs: https://sports.bzzoiro.com/docs/football/
-Base: https://sports.bzzoiro.com/api/v2/
-Auth: Authorization: Token <key>
-Free: football REST API (no card, 10 req/s)
 """
+import logging
 import os
 import re
+import time
 import unicodedata
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Iterable, Optional
+from urllib.parse import parse_qsl, urlparse
 
 import requests
 
 from .base import FootballProvider, ProviderError
-from .schemas import Fixture, MatchSnapshot, MatchEvent, Lineup, TeamRef
 from .helpers import TEAM_COLORS
+from .schemas import Fixture, HeadToHead, Lineup, MatchEvent, MatchSnapshot, TeamRef
 
 BASE = "https://sports.bzzoiro.com/api/v2"
+logger = logging.getLogger(__name__)
 
-# --- League name map (BSD has league_id, not league name) ---
-# Populate this as you encounter leagues. Unknown leagues fall back
-# to "League #{id}" so the UI still groups them.
 LEAGUE_NAMES: dict[int, str] = {
     80: "Categoría Primera A",
-    # add more as you discover them
+}
+
+DEFAULT_TEAM_COLOR = "#27272a"
+
+# Audience timezone assumed for date-window trimming (UTC+3 for Addis Ababa).
+# Expressed as an offset so we don't require zoneinfo at import time.
+AUDIENCE_UTC_OFFSET = timedelta(hours=3)
+
+_POSITION_MAP = {
+    "G": "GK", "GK": "GK",
+    "D": "DF", "DF": "DF", "DEF": "DF",
+    "M": "MF", "MF": "MF", "MID": "MF",
+    "F": "FW", "FW": "FW", "ATT": "FW", "ST": "FW",
 }
 
 
 def _slug(name: str) -> str:
-    """ASCII-safe slug for crest file lookup."""
     name = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode()
     return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
 
 
 def _normalize_team_name(name: str) -> str:
-    """Strip common suffixes for color-map lookup."""
     for suffix in (" FC", " SC", " AFC", " CF", " CD", " AC"):
         if name.endswith(suffix):
-            name = name[: -len(suffix)]
-            break
+            return name[: -len(suffix)].strip()
     return name.strip()
 
 
 def _team_color(name: str) -> str:
     if not name:
-        return "#27272a"
+        return DEFAULT_TEAM_COLOR
     if name in TEAM_COLORS:
         return TEAM_COLORS[name]
     normalized = _normalize_team_name(name)
     if normalized in TEAM_COLORS:
         return TEAM_COLORS[normalized]
-    # Case-insensitive fallback
     lower = name.lower()
     for key, color in TEAM_COLORS.items():
         if key.lower() == lower:
             return color
-    return "#27272a"
+    return DEFAULT_TEAM_COLOR
 
 
 def _team_from_event(ev: dict, side: str) -> TeamRef:
-    """
-    BSD returns flat fields: `home_team`, `home_team_id`, `away_team`, `away_team_id`.
-    """
     name = ev.get(f"{side}_team") or ""
     team_id = ev.get(f"{side}_team_id") or ""
     slug = _slug(name)
@@ -76,18 +77,36 @@ def _team_from_event(ev: dict, side: str) -> TeamRef:
     )
 
 
-def _parse_dt(value: str | None) -> datetime:
+def _parse_dt(value: str | None) -> Optional[datetime]:
+    """Return a tz-aware datetime, or None if the value is missing/unparseable."""
     if not value:
-        return datetime.now(timezone.utc)
+        return None
     try:
-        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
     except ValueError:
-        return datetime.now(timezone.utc)
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def _to_date(value):
+    """'2026-11-01' (or full ISO) -> date, else None."""
+    if not value:
+        return None
+    dt = _parse_dt(str(value))
+    return dt.date() if dt else None
+
+
+def _safe_int(value, default: int = 0) -> int:
+    try:
+        return int(str(value).split("+")[0].split("'")[0])
+    except (TypeError, ValueError):
+        return default
 
 
 class BzzoiroProvider(FootballProvider):
     name = "bzzoiro"
+    MAX_WINDOW_DAYS = 62      # ~2 months: one month ahead + the month after
+    MAX_PAGES = 12            # safety stop for pagination
 
     def __init__(self):
         self.api_key = os.getenv("FOOTBALL_API_KEY")
@@ -99,31 +118,57 @@ class BzzoiroProvider(FootballProvider):
             "Accept": "application/json",
         })
         self._league_cache: dict[int, str] = dict(LEAGUE_NAMES)
+        # In-memory live cache to prevent multiple /events/live/ calls in one loop
+        self._live_cache: dict[str, dict] = {}
+        self._live_cache_ts: float = 0.0
 
     # --- HTTP ---
+
+    def _paged(self, path: str, params: dict) -> list[dict]:
+        """Follow DRF-style `next` links so a big window isn't silently cut at the first page."""
+        rows: list[dict] = []
+        next_path, next_params = path, dict(params)
+        for _ in range(self.MAX_PAGES):
+            data = self._get(next_path, params=next_params)
+            rows.extend(data.get("results") or [])
+            nxt = data.get("next")
+            if not nxt:
+                break
+            u = urlparse(nxt)
+            next_path = u.path.replace("/api/v2", "", 1)
+            next_params = dict(parse_qsl(u.query))
+        else:
+            logger.warning("_paged hit MAX_PAGES=%d for %s; results may be truncated",
+                           self.MAX_PAGES, path)
+        return rows
 
     def _get(self, path: str, params: Optional[dict] = None) -> dict:
         try:
             r = self.session.get(f"{BASE}{path}", params=params, timeout=15)
         except requests.RequestException as e:
-            raise ProviderError(f"Bzzoiro transport error: {e}") from e
+            raise ProviderError(f"Bzzoiro transport error on {path}: {e}") from e
 
         if r.status_code == 401:
             raise ProviderError("Bzzoiro: invalid token (401)")
         if r.status_code == 402:
             raise ProviderError("Bzzoiro: endpoint requires paid add-on (402)")
+        if r.status_code == 429:
+            raise ProviderError("Bzzoiro: rate limited (429)")
         if r.status_code >= 400:
-            raise ProviderError(f"Bzzoiro HTTP {r.status_code}: {r.text[:200]}")
+            raise ProviderError(
+                f"Bzzoiro HTTP {r.status_code} on {path}: {r.text[:200]}"
+            )
 
         if not r.text:
             return {}
         try:
             return r.json()
         except ValueError as e:
-            raise ProviderError(f"Bzzoiro returned non-JSON: {r.text[:200]}") from e
+            raise ProviderError(
+                f"Bzzoiro returned non-JSON on {path}: {r.text[:200]}"
+            ) from e
 
     def _league_name(self, league_id: int | None) -> str:
-        """Resolve a league name from ID, caching results."""
         if not league_id:
             return "Unknown"
         if league_id in self._league_cache:
@@ -138,103 +183,186 @@ class BzzoiroProvider(FootballProvider):
 
     # --- Interface methods ---
 
-    def get_fixtures(self, date: Optional[str] = None) -> Iterable[Fixture]:
-        """
-        GET /events/?date_from=YYYY-MM-DD&date_to=YYYY-MM-DD
-        Response: {"count": N, "results": [{"id": ..., "home_team": "...", ...}]}
-        """
-        if not date:
-            date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    def get_fixtures(self, date_from: Optional[str] = None,
+                     date_to: Optional[str] = None) -> Iterable[Fixture]:
+        today = datetime.now(timezone.utc).date()
+        start = _to_date(date_from) or today
+        end = _to_date(date_to) or (start + timedelta(days=7))
+        if end < start:
+            start, end = end, start
 
-        data = self._get("/events/", params={"date_from": date, "date_to": date})
-        results = data.get("results") or []
+        capped = start + timedelta(days=self.MAX_WINDOW_DAYS)
+        if end > capped:
+            logger.warning("get_fixtures window %s..%s exceeds MAX_WINDOW_DAYS; "
+                           "clamping to %s", start, end, capped)
+            end = capped
 
-        fixtures: list[Fixture] = []
-        for ev in results:
-            league_id = ev.get("league_id")
-            league_name = self._league_name(league_id)
+        # Provider dates are UTC but the audience isn't (UTC+3): fetch with a margin
+        # so matches that are "today" locally don't vanish on the UTC boundary.
+        q_from = (start - timedelta(days=1)).isoformat()
+        q_to = (end + timedelta(days=1)).isoformat()
 
-            fixtures.append(Fixture(
-                id=str(ev["id"]),
-                competition=league_name,
-                league_id=str(league_id or ""),
-                home=_team_from_event(ev, "home"),
-                away=_team_from_event(ev, "away"),
-                kickoff=_parse_dt(ev.get("event_date")),
-                status=self._map_status(ev.get("status")),
-                coverage={
-                    "lineups": True,
-                    "events": True,
-                    "stats": True,
-                    "coordinates": False,
-                },
-            ))
-        return fixtures
+        fixtures: dict[str, Fixture] = {}
+        errors: list[str] = []
 
-    def get_match_snapshot(self, match_id: str) -> Optional[MatchSnapshot]:
-        """
-        GET /events/{id}/ + /events/{id}/stats/
-        Event object is the SAME shape as the fixtures list.
-        """
-        ev = self._get(f"/events/{match_id}/")
-        if not ev or not ev.get("id"):
-            return None
-
-        # Stats sub-resource
+        # 1) Scheduled / finished events in the window (paginated).
         try:
-            stats_raw = self._get(f"/events/{match_id}/stats/")
-        except ProviderError:
-            stats_raw = {}
-        stats = self._normalize_stats(stats_raw)
+            for ev in self._paged("/events/", {"date_from": q_from, "date_to": q_to, "limit": 200}):
+                fx = self._build_fixture(ev)
+                if fx is not None:
+                    fixtures[str(ev["id"])] = fx
+        except ProviderError as e:
+            errors.append(str(e))
+            logger.warning("Fixtures window %s..%s failed: %s", q_from, q_to, e)
 
-        # Score: flat fields `home_score`, `away_score`
-        score = {
-            "home": int(ev.get("home_score") or 0),
-            "away": int(ev.get("away_score") or 0),
-        }
+        # 2) Live overrides — only relevant if the window includes today.
+        if start <= today <= end:
+            try:
+                live = self._get("/events/live/")
+                for ev in (live.get("events") or []):
+                    fx = self._build_fixture(ev, force_status="live")
+                    if fx is not None:
+                        fixtures[str(ev["id"])] = fx
+            except ProviderError as e:
+                errors.append(str(e))
+                logger.warning("Live fixtures failed: %s", e)
 
-        # Status → period mapping
-        raw_status = ev.get("status") or ""
-        period = self._map_period(raw_status, ev.get("period"))
-        minute = int(ev.get("current_minute") or 0)
+        # Don't hide a total failure behind an empty list.
+        if not fixtures and errors:
+            raise ProviderError("; ".join(errors))
 
-        # Updated timestamp: BSD has no `updated_at`, so we treat now as fresh
-        now = datetime.now(timezone.utc)
+        # Trim the safety margin back to the user's local date range.
+        lo = start - timedelta(days=1)
+        hi = end + timedelta(days=1)
 
-        return MatchSnapshot(
-            match_id=str(ev["id"]),
-            competition=self._league_name(ev.get("league_id")),
+        def _local_date(dt: datetime):
+            return (dt + AUDIENCE_UTC_OFFSET).date()
+
+        return [f for f in fixtures.values() if lo <= _local_date(f.kickoff) <= hi]
+
+    @staticmethod
+    def _map_status(raw: str | None) -> str:
+        s = (raw or "").lower().replace(" ", "_")
+        if s in ("finished", "ended", "ft", "aet", "after_penalties", "awarded", "walkover"):
+            return "ft"
+        if s in ("live", "inprogress", "in_progress", "1st_half", "2nd_half",
+                 "first_half", "second_half", "halftime", "half_time", "ht",
+                 "extra_time", "penalties", "break"):
+            return "live"
+        return "scheduled"  # notstarted / scheduled / postponed / cancelled
+
+    def _build_fixture(self, ev: dict, force_status: str | None = None) -> Optional[Fixture]:
+        kickoff = _parse_dt(ev.get("event_date"))
+        if kickoff is None:
+            logger.warning("Skipping event %s: missing/invalid event_date", ev.get("id"))
+            return None
+        league_id = ev.get("league_id")
+        return Fixture(
+            id=str(ev["id"]),
+            competition=self._league_name(league_id),
+            league_id=str(league_id or ""),
             home=_team_from_event(ev, "home"),
             away=_team_from_event(ev, "away"),
-            score=score,
-            period=period,
-            minute=minute,
-            status=self._map_status(raw_status),
-            stats=stats,
-            provider_updated_at=now,
-            received_at=now,
-            freshness="fresh",
+            kickoff=kickoff,
+            status=force_status or self._map_status(ev.get("status")),
+            coverage={"lineups": True, "events": True, "stats": True, "coordinates": False},
         )
 
-    def get_events_since(
-        self, match_id: str, since: Optional[datetime] = None
-    ) -> Iterable[MatchEvent]:
+    def _get_live_cache(self) -> dict[str, dict]:
+        """Fetch live matches once every 15 seconds; return the last good cache on failure."""
+        now = time.time()
+        if now - self._live_cache_ts < 15:
+            return self._live_cache
+        try:
+            live_data = self._get("/events/live/")
+            events = live_data.get("events") or []
+            self._live_cache = {str(ev["id"]): ev for ev in events}
+            self._live_cache_ts = now
+            logger.debug("live cache refreshed: %d events", len(events))
+        except ProviderError as e:
+            logger.warning("Live cache fetch failed: %s", e)
+        return self._live_cache
+
+    def get_match_snapshot(self, match_id: str,
+                           live_cache: dict | None = None) -> Optional[MatchSnapshot]:
         """
-        GET /events/{id}/incidents/
-        Response: {"incidents": [{"id": ..., "type": "goal"|"card"|"sub", "minute": N, ...}]}
+        Try the live endpoint first (fast, free, updates every 10-30s).
+        Fall back to the detail endpoint if the match isn't live.
+
+        NOTE: snapshots sourced from the live endpoint carry empty `stats`
+        (the live feed omits them). Pollers should tolerate that.
         """
+        cache = live_cache if live_cache is not None else self._get_live_cache()
+
+        if str(match_id) in cache:
+            ev = cache[str(match_id)]
+            now = datetime.now(timezone.utc)
+            return MatchSnapshot(
+                match_id=str(ev["id"]),
+                competition=self._league_name(ev.get("league_id")),
+                home=_team_from_event(ev, "home"),
+                away=_team_from_event(ev, "away"),
+                score={
+                    "home": _safe_int(ev.get("home_score")),
+                    "away": _safe_int(ev.get("away_score")),
+                },
+                period=self._map_period(ev.get("status"), ev.get("period")),
+                minute=_safe_int(ev.get("current_minute")),
+                status=self._map_status(ev.get("status")),
+                stats={},
+                provider_updated_at=now,
+                received_at=now,
+                freshness="fresh",
+            )
+
+        try:
+            ev = self._get(f"/events/{match_id}/")
+            if not ev or not ev.get("id"):
+                return None
+
+            stats_raw: dict = {}
+            try:
+                stats_raw = self._get(f"/events/{match_id}/stats/")
+            except ProviderError:
+                pass
+
+            now = datetime.now(timezone.utc)
+            return MatchSnapshot(
+                match_id=str(ev["id"]),
+                competition=self._league_name(ev.get("league_id")),
+                home=_team_from_event(ev, "home"),
+                away=_team_from_event(ev, "away"),
+                score={
+                    "home": _safe_int(ev.get("home_score")),
+                    "away": _safe_int(ev.get("away_score")),
+                },
+                period=self._map_period(ev.get("status"), ev.get("period")),
+                minute=_safe_int(ev.get("current_minute")),
+                status=self._map_status(ev.get("status")),
+                stats=self._normalize_stats(stats_raw),
+                provider_updated_at=now,
+                received_at=now,
+                freshness="fresh",
+            )
+        except ProviderError:
+            return None
+
+    def get_events_since(self, match_id: str,
+                         since: Optional[datetime] = None) -> Iterable[MatchEvent]:
         try:
             data = self._get(f"/events/{match_id}/incidents/")
         except ProviderError:
             return []
 
-        incidents = data.get("incidents") or []
         events: list[MatchEvent] = []
-
-        for inc in incidents:
+        for inc in data.get("incidents") or []:
             inc_type = (inc.get("type") or "").lower()
             mapped_type = self._map_event_type(inc_type)
-            if not mapped_type:
+            if mapped_type is None:
+                continue
+
+            updated_at = _parse_dt(inc.get("updated_at"))
+            if since is not None and updated_at is not None and updated_at <= since:
                 continue
 
             events.append(MatchEvent(
@@ -244,159 +372,99 @@ class BzzoiroProvider(FootballProvider):
                 team_id=str(inc.get("team_id") or ""),
                 player_id=str(inc.get("player_id")) if inc.get("player_id") else None,
                 player_name=inc.get("player_name") or inc.get("player"),
-                minute=int(inc.get("minute") or 0),
+                minute=_safe_int(inc.get("minute")),
                 status="confirmed",
-                source_updated_at=_parse_dt(inc.get("updated_at")),
+                source_updated_at=updated_at or datetime.now(timezone.utc),
                 received_at=datetime.now(timezone.utc),
                 detail=inc.get("detail") or inc.get("description"),
             ))
-
         return events
 
-    def get_lineups(self, match_id: str) -> Iterable[Lineup]:
-        """
-        Fetch lineups from Bzzoiro and normalize to Lineup DTOs.
-
-        Bzzoiro returns positions as single letters (G/D/M/F) and jersey number
-        as `jersey_number`. We map to full role names (GK/DF/MF/FW) and to
-        `number` so downstream code (and the frontend) work with a consistent shape.
-        """
-        import os
-        import requests as http
-        from .schemas import Lineup
-        from datetime import datetime, timezone
-
-        key = os.getenv("FOOTBALL_API_KEY")
-        if not key:
-            return []
-
-        # Map Bzzoiro's single-letter position to full role name
-        POSITION_MAP = {
-            "G": "GK",
-            "GK": "GK",
-            "D": "DF",
-            "DF": "DF",
-            "DEF": "DF",
-            "M": "MF",
-            "MF": "MF",
-            "MID": "MF",
-            "F": "FW",
-            "FW": "FW",
-            "ATT": "FW",
-            "ST": "FW",
+    @staticmethod
+    def _normalize_player(p: dict) -> dict:
+        raw_pos = (p.get("position") or "").upper().strip()
+        return {
+            "id": p.get("id") or p.get("player_id"),
+            "name": p.get("name") or p.get("short_name") or "",
+            "number": p.get("jersey_number") or p.get("number"),
+            "position": _POSITION_MAP.get(raw_pos, raw_pos),
         }
 
-        def normalize_player(p: dict) -> dict:
-            raw_pos = (p.get("position") or "").upper().strip()
-            return {
-                "id": p.get("id") or p.get("player_id"), # Ensure this is captured!
-                "name": p.get("name") or p.get("short_name") or "",
-                "number": p.get("jersey_number") or p.get("number"),
-                "position": POSITION_MAP.get(raw_pos, raw_pos),
-            }
-
+    def get_lineups(self, match_id: str) -> Iterable[Lineup]:
         try:
-            r = http.get(
-                f"https://sports.bzzoiro.com/api/v2/events/{match_id}/lineups/",
-                headers={"Authorization": f"Token {key}"},
-                timeout=10,
-            )
-            if not r.ok:
-                return []
-
-            data = r.json()
-            lineups = data.get("lineups")
-            if not lineups:
-                return []  # lineup_status: "unavailable"
-
-            results = []
-            for side in ("home", "away"):
-                side_data = lineups.get(side)
-                if not side_data:
-                    continue
-
-                players = [normalize_player(p) for p in (side_data.get("players") or [])]
-                results.append(Lineup(
-                    match_id=match_id,
-                    team_id=str(side_data.get("team_id") or ""),
-                    formation=side_data.get("formation") or "",
-                    players=players,
-                    source_updated_at=datetime.now(timezone.utc),
-                ))
-            return results
-
-        except Exception as e:
-            import logging
-            logging.getLogger(__name__).warning("get_lineups %s failed: %s", match_id, e)
+            data = self._get(f"/events/{match_id}/lineups/")
+        except ProviderError as e:
+            logger.warning("get_lineups %s failed: %s", match_id, e)
             return []
-    
-    def get_head_to_head(self, team_a: str, team_b: str, limit: int = 10):
-        import requests as http, os
-        api_key = os.getenv("FOOTBALL_API_KEY")
-        if not api_key:
+
+        lineups = data.get("lineups")
+        if not isinstance(lineups, dict):
             return []
+
+        results: list[Lineup] = []
+        for side in ("home", "away"):
+            side_data = lineups.get(side)
+            if not side_data:
+                continue
+            players = [self._normalize_player(p)
+                       for p in (side_data.get("players") or [])]
+            results.append(Lineup(
+                match_id=match_id,
+                team_id=str(side_data.get("team_id") or ""),
+                formation=side_data.get("formation") or "",
+                players=players,
+                source_updated_at=datetime.now(timezone.utc),
+            ))
+        return results
+
+    def get_head_to_head(self, team_a: str, team_b: str,
+                         limit: int = 10) -> list[HeadToHead]:
         try:
-            r = http.get(
-                "https://sports.bzzoiro.com/api/v2/h2h/",
-                headers={"Authorization": f"Token {api_key}"},
-                params={"team_a": team_a, "team_b": team_b, "limit": limit},
-                timeout=10,
-            )
-            if not r.ok:
-                return []
-            data = r.json()
-            from .schemas import HeadToHead
-            return [
-                HeadToHead(
+            data = self._get("/h2h/", params={
+                "team_a": team_a, "team_b": team_b, "limit": limit,
+            })
+        except ProviderError as e:
+            logger.warning("get_head_to_head failed: %s", e)
+            return []
+
+        out: list[HeadToHead] = []
+        for m in data.get("meetings") or []:
+            try:
+                out.append(HeadToHead(
                     date=m["date"],
                     home_team=m["home_team"],
                     away_team=m["away_team"],
                     score=m["score"],
                     competition=m.get("competition", ""),
-                )
-                for m in (data.get("meetings") or [])
-            ]
-        except Exception:
-            return []
-
+                ))
+            except KeyError:
+                continue
+        return out
 
     def get_upcoming_fixtures(self, team_id: str, limit: int = 5):
-        """
-        Fetch upcoming fixtures for a team.
-        If the Bzzoiro API exposes this, call it. Otherwise return [].
-        """
-        try:
-            return []
-        except Exception:
-            return []
+        # TODO: implement once BSD exposes a per-team fixtures endpoint.
+        # Returning [] silently masks "not implemented" from callers.
+        raise NotImplementedError(
+            "BzzoiroProvider.get_upcoming_fixtures is not implemented yet"
+        )
 
     # --- Mapping helpers ---
 
     @staticmethod
-    def _map_status(raw: str | None) -> str:
-        """
-        BSD statuses: notstarted, live, finished, postponed, cancelled, abandoned.
-        Map to scheduled | live | ft.
-        """
-        s = (raw or "").lower()
-        if s in ("finished", "awarded", "walkover"):
-            return "ft"
-        if s in ("live", "inprogress", "in_progress"):
-            return "live"
-        return "scheduled"
-
-    @staticmethod
     def _map_period(status: str | None, period: str | int | None) -> str:
-        if (status or "").lower() == "finished":
+        s = (status or "").lower()
+        if s == "finished":
             return "FT"
-        if period == 1 or period == "1" or period == "1H":
+        if period in (1, "1", "1H"):
             return "1H"
-        if period == 2 or period == "2" or period == "2H":
+        if period in (2, "2", "2H"):
             return "2H"
         if isinstance(period, int) and period >= 3:
             return "ET"
         if isinstance(period, str) and period:
             return period.upper()
+        if s in ("live", "inprogress", "in_progress"):
+            return "LIVE"
         return "NS"
 
     @staticmethod
@@ -413,9 +481,6 @@ class BzzoiroProvider(FootballProvider):
 
     @staticmethod
     def _normalize_stats(raw: dict) -> dict:
-        """
-        BSD stats shape varies; check for either flat dict or {"home": {...}, "away": {...}}.
-        """
         if not raw:
             return {}
 
@@ -439,6 +504,8 @@ class BzzoiroProvider(FootballProvider):
             h = home.get(bsd_key)
             a = away.get(bsd_key)
             if h is not None or a is not None:
-                out[our_key] = {"home": h or 0, "away": a or 0}
-
+                out[our_key] = {
+                    "home": h if h is not None else 0,
+                    "away": a if a is not None else 0,
+                }
         return out

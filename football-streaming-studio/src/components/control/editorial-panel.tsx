@@ -20,16 +20,18 @@ import { buildLiveScoreItems } from "@/lib/overlay/live-ticker";
 import { inputClass } from "@/components/ui/form";
 import { useT, type MsgKey } from "@/lib/i18n";
 import { useFormat } from "@/lib/i18n/use-format";
+import { PlayerPicker } from "@/components/control/player-picker";
 
 type CardType =
   | "fixture_intro" | "countdown" | "match_summary" | "lineups" | "prediction"
   | "standings" | "top_scorers" | "top_assists" | "head_to_head" | "form"
-  | "shot_map" | "momentum" | "best_xi" | "match_preview" | "custom";
+  | "shot_map" | "momentum" | "best_xi" | "player_stats" | "match_preview"
+  | "broadcasts" | "custom" | "odds_board" | "match_stats" | "xg_race" | "average_positions";
 
 type AvailabilityFlag =
   | "stats" | "lineups" | "incidents" | "shotmap" | "xg"
   | "momentum" | "average_positions" | "player_stats"
-  | "prediction" | "broadcasts" | "odds";
+  | "prediction" | "broadcasts" | "odds_board" | "match_stats";
 
 const REQUIRES: Record<CardType, AvailabilityFlag[]> = {
   fixture_intro: [],
@@ -40,13 +42,19 @@ const REQUIRES: Record<CardType, AvailabilityFlag[]> = {
   top_scorers:   [],
   top_assists:   [],
   best_xi:       [],
+  match_stats:   ["stats"],
+  player_stats:  ["player_stats"],
   head_to_head:  [],
+  broadcasts:    ["broadcasts"],
   prediction:    ["prediction"],
   form:          [],
+  xg_race:       ["xg"],
   shot_map:      ["shotmap"],
   momentum:      ["momentum"],
+  average_positions: [],
   match_preview: [],
   custom:        [],
+  odds_board:    ["odds_board"],
 };
 
 // Fallback labels + hints — used when the i18n bundle doesn't yet have
@@ -63,17 +71,24 @@ const CARD_META: Record<CardType, { label: string; hint: string }> = {
   form:          { label: "Recent form",    hint: "Last 5, both teams" },
   prediction:    { label: "Prediction",     hint: "Model probabilities" },
   shot_map:      { label: "Shot map",       hint: "Every shot with xG" },
-  best_xi: { label: "Best XI", hint: "Team of the season" },
+  broadcasts:    { label: "Where to watch", hint: "TV & streaming channels" },
+  best_xi:       { label: "Best XI", hint: "Team of the season" },
+  match_stats:   { label: "Match stats", hint: "Possession, shots, xG" },
+  average_positions: { label: "Average positions", hint: "Where players spent the match" },
+  xg_race:       { label: "xG race", hint: "Cumulative xG over 90'" },
+  player_stats:  { label: "Player ratings", hint: "Match ratings + key stats" },
   momentum:      { label: "Momentum",       hint: "Pressure chart over 90'" },
   custom:        { label: "Custom",         hint: "Custom payload" },
   match_preview: { label: "Match preview", hint: "AI narrative + venue + weather" },
+  odds_board:          { label: "Odds",           hint: "Match betting odds" },
 };
 
-// Order of buttons in the "Add card" grid
-const CARD_ORDER: CardType[] = [
-  "match_preview", "fixture_intro", "countdown", "match_summary", "lineups",
-  "standings", "top_scorers", "top_assists", "best_xi", "head_to_head",
-  "form", "prediction", "shot_map", "momentum",
+// The "Add card" picker is grouped by when in a show a producer reaches for each graphic.
+const PHASES: { key: "pre" | "live" | "post" | "league"; label: MsgKey; cards: CardType[] }[] = [
+  { key: "pre", label: "gfx.phase.pre", cards: ["match_preview", "fixture_intro", "broadcasts", "countdown", "lineups", "head_to_head", "form", "prediction", "odds_board"] },
+  { key: "live", label: "gfx.phase.live", cards: ["match_stats", "shot_map", "momentum", "average_positions", "xg_race"] },
+  { key: "post", label: "gfx.phase.post", cards: ["match_summary", "player_stats"] },
+  { key: "league", label: "gfx.phase.league", cards: ["standings", "top_scorers", "top_assists", "best_xi"] },
 ];
 
 export function EditorialPanel() {
@@ -88,6 +103,7 @@ export function EditorialPanel() {
   const [tickerLabel, setTickerLabel] = useState("News");
   const [error, setError] = useState<string | null>(null);
   const { data: availability, loading: availabilityLoading } = useMatchAvailability(params.sessionId);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -109,13 +125,13 @@ export function EditorialPanel() {
     const required = REQUIRES[cardType] ?? [];
     if (required.length === 0) return true;
     if (!availability?.available) return true;
-    return required.every((flag) => availability.available[flag] === true);
+    return required.every((flag) => availability.available[flag as keyof typeof availability.available] === true);
   };
 
   const reason = (cardType: CardType): string | null => {
     const required = REQUIRES[cardType] ?? [];
     if (!availability?.available) return null;
-    const missing = required.filter((flag) => availability.available[flag] !== true);
+    const missing = required.filter((flag) => availability.available[flag as keyof typeof availability.available] !== true);
     if (missing.length === 0) return null;
     return t("gfx.noData", { list: missing.join(", ") });
   };
@@ -133,11 +149,27 @@ export function EditorialPanel() {
     }
   };
 
-  const create = (type: string) =>
-    guard(type, async () => {
+  const create = (type: string) => {
+    if (type === "player_stats") {
+      setPickerOpen(true);
+      return;
+    }
+    return guard(type, async () => {
       await api.seedEditorialCard(params.sessionId, type);
       setAdding(false);
     }, t("gfx.err.create"));
+  };
+
+  // New: create player_stats with chosen IDs
+  const createPlayerStatsWithSelection = async (playerIds: string[]) => {
+    await guard("player_stats", async () => {
+      await api.seedEditorialCard(params.sessionId, "player_stats", {
+        player_ids: playerIds,
+      });
+      setPickerOpen(false);
+      setAdding(false);
+    }, t("gfx.err.create"));
+  };
 
   const show = (id: string) =>
     guard(id, () => api.broadcastEditorialCard(params.sessionId, id), t("gfx.err.show"));
@@ -287,25 +319,34 @@ export function EditorialPanel() {
       {adding && (
         <div className="rounded-xl border border-zinc-700 bg-zinc-950 p-3">
           <SectionLabel>{t("gfx.create")}</SectionLabel>
-          <div className="flex flex-wrap gap-1.5">
-            {CARD_ORDER.map((type) => {
-              const label = typeLabel(type);
-              const hint = typeHint(type);
-              const ok = isAvailable(type);
-              const why = reason(type);
-              return (
-                <Button
-                  key={type}
-                  size="sm"
-                  onClick={() => create(type)}
-                  disabled={busy === type || !ok}
-                  loading={busy === type}
-                  title={!ok ? (why ?? t("gfx.unavailable")) : hint}
-                >
-                  {label}
-                </Button>
-              );
-            })}
+          <div className="flex flex-col gap-3">
+            {PHASES.map((phase) => (
+              <div key={phase.key}>
+                <div className="mb-1.5 flex items-center gap-2 font-display text-xs font-bold uppercase tracking-[0.16em] text-emerald-400">
+                  <span className="h-px w-3 bg-emerald-500" aria-hidden />{t(phase.label)}
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {phase.cards.map((type) => {
+                    const label = typeLabel(type);
+                    const hint = typeHint(type);
+                    const ok = isAvailable(type);
+                    const why = reason(type);
+                    return (
+                      <Button
+                        key={type}
+                        size="sm"
+                        onClick={() => create(type)}
+                        disabled={busy === type || !ok}
+                        loading={busy === type}
+                        title={!ok ? (why ?? t("gfx.unavailable")) : hint}
+                      >
+                        {label}
+                      </Button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
           </div>
           {hasAvailability && (
             <div className="mt-2 rounded border border-zinc-800 bg-zinc-900/50 p-2 text-[10px] text-zinc-500">
@@ -373,8 +414,15 @@ export function EditorialPanel() {
       ) : cards.length === 0 ? (
         <EmptyState title={t("gfx.emptyTitle")} description={t("gfx.emptyBody")} />
       ) : (
+        <div className="flex flex-col gap-4">
+          {[
+            { key: "on", label: "gfx.listOnAir" as MsgKey, items: cards.filter((c) => c.visible) },
+            { key: "ready", label: "gfx.listReady" as MsgKey, items: cards.filter((c) => !c.visible) },
+          ].filter((g) => g.items.length > 0).map((group) => (
+        <section key={group.key} aria-label={t(group.label)}>
+          <SectionLabel className={group.key === "on" ? "text-red-400" : undefined}>{t(group.label)} · {group.items.length}</SectionLabel>
         <ul className="flex flex-col gap-2">
-          {cards.map((c) => (
+          {group.items.map((c) => (
             <li
               key={c.id}
               className={cn(
@@ -437,6 +485,17 @@ export function EditorialPanel() {
             </li>
           ))}
         </ul>
+        </section>
+          ))}
+        </div>
+      )}
+
+      {pickerOpen && (
+        <PlayerPicker
+          sessionId={params.sessionId}
+          onClose={() => setPickerOpen(false)}
+          onConfirm={createPlayerStatsWithSelection}
+        />
       )}
     </div>
   );

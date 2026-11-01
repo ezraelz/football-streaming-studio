@@ -55,6 +55,16 @@ export function LeagueBadge({ theme, size = 40 }: { theme: LeagueTheme; size?: n
   );
 }
 
+function spikesPath(cx: number, cy: number, R: number, r: number, n: number) {
+  const pts: string[] = [];
+  for (let i = 0; i < n * 2; i++) {
+    const rad = i % 2 === 0 ? R : r;
+    const a = -Math.PI / 2 + (i * Math.PI) / n;
+    pts.push(`${(cx + rad * Math.cos(a)).toFixed(2)} ${(cy + rad * Math.sin(a)).toFixed(2)}`);
+  }
+  return `M${pts.join("L")}Z`;
+}
+
 function star(cx: number, cy: number, R: number, r: number) {
   const pts: string[] = [];
   for (let i = 0; i < 10; i++) {
@@ -69,6 +79,27 @@ function star(cx: number, cy: number, R: number, r: number) {
 function MotifShape({ motif, color }: { motif: Motif; color: string }) {
   switch (motif) {
     case "star": return <path d={star(32, 22, 9, 3.9)} fill={color} />;
+    case "lion":
+      return (
+        <g>
+          <path d={spikesPath(32, 22, 11.5, 8.4, 14)} fill={color} />
+          <circle cx="32" cy="22.5" r="6.2" fill="rgba(0,0,0,.45)" />
+          <circle cx="29.6" cy="21.5" r="1.1" fill={color} /><circle cx="34.4" cy="21.5" r="1.1" fill={color} />
+          <path d="M30.2 25.2h3.6L32 27.3Z" fill={color} />
+        </g>
+      );
+    case "starball":
+      return (
+        <g>
+          <circle cx="32" cy="23" r="6.4" fill="none" stroke={color} strokeWidth="2" />
+          <path d="M32 19.4 35 21.6 33.9 25.1h-3.8L29 21.6Z" fill={color} />
+          {Array.from({ length: 7 }, (_, i) => {
+            const a = Math.PI + (i * Math.PI) / 6;
+            return <path key={i} d={star(32 + 12.5 * Math.cos(a), 23 + 12.5 * Math.sin(a), 2.6, 1.1)} fill={color} />;
+          })}
+        </g>
+      );
+    case "shield": return <path d="M32 10 44 14v9c0 7-5 11-12 14-7-3-12-7-12-14v-9Z" fill={color} />;
     case "stars": return <g fill={color}><path d={star(20, 24, 5.2, 2.2)} /><path d={star(32, 18, 6.4, 2.7)} /><path d={star(44, 24, 5.2, 2.2)} /></g>;
     case "crown": return <path d="M21 28 19 15l8 6 5-9 5 9 8-6-2 13Z" fill={color} />;
     case "bolt": return <path d="M35 11 24 25h7l-3 10 12-15h-7Z" fill={color} />;

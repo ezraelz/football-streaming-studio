@@ -1,10 +1,11 @@
 "use client";
 import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
-import type { EditorialCard, MomentumPayload, PredictionPayload } from "@/lib/api/client";
+import type { EditorialCard, MomentumPayload } from "@/lib/api/client";
 import { TeamCrest } from "@/components/overlay/crest";
 import { LeagueBadge } from "@/components/overlay/league-badge";
 import { useOverlayEnv } from "@/components/overlay/env";
-import { useI18n } from "@/lib/i18n";
+import { BroadcastPanel } from "@/components/overlay/broadcast";
+import { useI18n, type MsgKey } from "@/lib/i18n";
 import { localTeamName } from "@/lib/branding/clubs";
 import { accentOn, alpha, competitionLabel, themeFor, themeGradient, type LeagueTheme } from "@/lib/branding/leagues";
 import { CardErrorBoundary } from "./card-error-boundary";
@@ -150,6 +151,193 @@ interface BestXIPayload {
   competition: string;
   formation: string;
   players: BestXIPlayer[];
+  unavailable?: boolean;
+}
+
+interface PlayerStat {
+  player_id: string | number | null;
+  name: string;
+  team: "home" | "away";
+  minutes: number;
+  rating: number | string | null;
+  goals: number;
+  assists: number;
+  shots: number;
+  shots_on_target: number;
+  passes: number;
+  pass_accuracy: number | null;
+  tackles: number;
+  interceptions: number;
+  xg: number | null;
+  xg_on_target: number | null;
+  big_chances_created: number;
+  carries: number;
+}
+
+interface PlayerStatsPayload {
+  competition: string;
+  home_name: string;
+  away_name: string;
+  home_color: string;
+  away_color: string;
+  players: PlayerStat[];
+  unavailable?: boolean;
+}
+
+interface BroadcastChannel {
+  name: string;
+  type: string;   // "tv" | "streaming" | "radio"
+}
+
+interface BroadcastCountry {
+  country_code: string;
+  country_name: string;
+  channels: BroadcastChannel[];
+}
+
+interface BroadcastsPayload {
+  competition: string;
+  home_name: string;
+  away_name: string;
+  home_short: string;
+  away_short: string;
+  home_color: string;
+  away_color: string;
+  kickoff_label: string;
+  channels: Array<BroadcastChannel & { country_code: string; country_name: string }>;
+  by_country: Record<string, BroadcastCountry>;
+  unavailable?: boolean;
+}
+
+interface PredictionMarketProb {
+  home: number;
+  draw: number;
+  away: number;
+  over_25?: number | null;
+  btts_yes?: number | null;
+}
+
+interface PredictionModelProb {
+  home: number;
+  draw: number;
+  away: number;
+  over_25?: number | null;
+  btts_yes?: number | null;
+  xg_home?: number | null;
+  xg_away?: number | null;
+  confidence?: number | null;
+  version?: string;
+}
+
+interface PredictionPayload {
+  competition: string;
+  home_name: string;
+  away_name: string;
+  home_short?: string;
+  away_short?: string;
+  home_color?: string;
+  away_color?: string;
+  kickoff_label?: string;
+  model: PredictionModelProb | null;
+  market: PredictionMarketProb | null;
+  prediction_available: boolean;
+  odds_available: boolean;
+  unavailable?: boolean;
+  reason?: string;
+}
+
+interface OddsMarket {
+  home?: number;
+  draw?: number;
+  away?: number;
+  over?: number;
+  under?: number;
+  yes?: number;
+  no?: number;
+  "1X"?: number;
+  "12"?: number;
+  "X2"?: number;
+}
+
+interface OddsBoardPayload {
+  competition: string;
+  home_name: string;
+  away_name: string;
+  home_short: string;
+  away_short: string;
+  home_color: string;
+  away_color: string;
+  markets: {
+    "1x2"?: OddsMarket;
+    double_chance?: OddsMarket;
+    totals?: Record<string, OddsMarket>;
+    btts?: OddsMarket;
+  };
+  last_update?: string;
+  unavailable?: boolean;
+}
+
+interface StatRow {
+  key: string;
+  label: string;
+  format: "percent" | "decimal" | "int";
+  home: number;
+  away: number;
+  higher_is_better: boolean | null;
+}
+
+interface MatchStatsPayload {
+  competition: string;
+  home_name: string;
+  away_name: string;
+  home_short: string;
+  away_short: string;
+  home_color: string;
+  away_color: string;
+  stats: StatRow[];
+  unavailable?: boolean;
+}
+
+interface XGRaceSample {
+  minute: number;
+  home: number;
+  away: number;
+  estimated: boolean;
+}
+
+interface XGRacePayload {
+  competition: string;
+  home_name: string;
+  away_name: string;
+  home_short: string;
+  away_short: string;
+  home_color: string;
+  away_color: string;
+  samples: XGRaceSample[];
+  home_xg_final: number | null;
+  away_xg_final: number | null;
+  unavailable?: boolean;
+}
+
+interface AveragePosition {
+  player_id: string;
+  name: string;
+  pos: string;   // "GK" | "D" | "M" | "F"
+  x: number;     // 0..100 — 0 is own goal line
+  y: number;     // 0..100 — 0 is top touchline
+  n: number;     // touches (sample size)
+}
+
+interface AveragePositionsPayload {
+  competition: string;
+  home_name: string;
+  away_name: string;
+  home_short: string;
+  away_short: string;
+  home_color: string;
+  away_color: string;
+  home_positions: AveragePosition[];
+  away_positions: AveragePosition[];
   unavailable?: boolean;
 }
 
@@ -394,14 +582,14 @@ function TickerBar({ payload, theme, index }: { payload: TickerPayload; theme: L
         <span key={i} className="flex shrink-0 items-center">
           {it.tag && (
             <span
-              className="mr-3 rounded-md px-2.5 py-0.5 font-extrabold uppercase"
-              style={{ fontSize: 20, letterSpacing: "0.08em", background: alpha(theme.accent, 0.2), color: theme.accent }}
+              className="bc-slant mr-3 px-3 py-0.5 font-extrabold uppercase"
+              style={{ fontSize: 22, letterSpacing: "0.08em", background: theme.accent, color: "#0a101c" }}
             >
               {it.tag}
             </span>
           )}
-          <span className="font-semibold text-white" style={{ fontSize: 30 }}>{it.text}</span>
-          <span className="mx-8 inline-block rotate-45" style={{ width: 10, height: 10, background: theme.accent }} />
+          <span className="font-bold text-white" style={{ fontSize: 34 }}>{it.text}</span>
+          <span className="mx-8 inline-block font-black" style={{ fontSize: 30, color: theme.accent, letterSpacing: "-0.15em" }}>»»</span>
         </span>
       ))}
     </div>
@@ -409,23 +597,27 @@ function TickerBar({ payload, theme, index }: { payload: TickerPayload; theme: L
 
   return (
     <div
-      className="ov-card-in absolute flex overflow-hidden border border-white/10 backdrop-blur-xl"
-      style={{ left: 0, top: H - TICKER_H, width: W, height: TICKER_H, borderRadius: 20, background: "var(--ov-surface)", boxShadow: "var(--ov-shadow)", ["--ov-delay" as string]: `${index * 140}ms` } as CSSProperties}
+      className="ov-card-in bc-drop absolute"
+      style={{ left: 0, top: H - TICKER_H, width: W, height: TICKER_H, filter: "drop-shadow(0 12px 22px rgb(0 0 0 / 0.5))", ["--ov-delay" as string]: `${index * 120}ms` } as CSSProperties}
     >
-      <div
-        className="relative flex shrink-0 items-center gap-4 pl-6 pr-8"
-        style={{ background: `linear-gradient(90deg, ${theme.primary}, ${theme.secondary})` }}
-      >
-        {theme.id !== "default" && <LeagueBadge theme={theme} size={44} />}
-        <span className="font-black uppercase text-[#fff]" style={{ fontSize: 24, letterSpacing: "0.14em" }}>
-          {tickerLabel(payload.label, t)}
-        </span>
-        <span className="absolute inset-y-0 right-0 w-1" style={{ background: theme.accent }} />
-      </div>
-      <div className="relative min-w-0 flex-1 overflow-hidden" style={{ WebkitMaskImage: mask, maskImage: mask }}>
-        <div className="ov-marquee flex h-full w-max items-center whitespace-nowrap" style={{ animationDuration: `${duration}s` }}>
-          {row(false)}
-          {row(true)}
+      <div className="relative flex h-full overflow-hidden" style={{ background: "var(--ov-surface-solid)", borderTop: `4px solid ${theme.accent}` }}>
+        {/* slanted label tab */}
+        <div
+          className="bc-slant relative -ml-5 flex shrink-0 items-center"
+          style={{ paddingLeft: 44, paddingRight: 44, background: `linear-gradient(100deg, ${theme.primary}, ${theme.secondary})`, borderRight: `8px solid ${theme.accent}` }}
+        >
+          <span className="flex items-center gap-4">
+            {theme.id !== "default" && <LeagueBadge theme={theme} size={44} />}
+            <span className="font-extrabold uppercase text-[#fff]" style={{ fontSize: 28, letterSpacing: "0.14em" }}>
+              {tickerLabel(payload.label, t)}
+            </span>
+          </span>
+        </div>
+        <div className="relative min-w-0 flex-1 overflow-hidden" style={{ WebkitMaskImage: mask, maskImage: mask }}>
+          <div className="ov-marquee flex h-full w-max items-center whitespace-nowrap" style={{ animationDuration: `${duration}s` }}>
+            {row(false)}
+            {row(true)}
+          </div>
         </div>
       </div>
     </div>
@@ -453,9 +645,15 @@ function CardView({
       case "match_summary": return <SummaryCard payload={p as unknown as SummaryPayload} {...common} />;
       case "countdown":     return <CountdownCard payload={p as unknown as CountdownPayload} {...common} />;
       case "prediction":    return <PredictionCard payload={p as unknown as PredictionPayload} {...common} />;
-      case "shot_map": return <ShotMapCard payload={p as unknown as ShotMapPayload} {...common} />;
-      case "momentum": return <MomentumCard payload={p as unknown as MomentumPayload} {...common} />;
-      case "best_xi": return <BestXICard payload={p as unknown as BestXIPayload} {...common} />;
+      case "shot_map":      return <ShotMapCard payload={p as unknown as ShotMapPayload} {...common} />;
+      case "odds_board":    return <OddsBoardCard payload={p as unknown as OddsBoardPayload} {...common} />;
+      case "momentum":      return <MomentumCard payload={p as unknown as MomentumPayload} {...common} />;
+      case "best_xi":       return <BestXICard payload={p as unknown as BestXIPayload} {...common} />;
+      case "xg_race":       return <XGRaceCard payload={p as unknown as XGRacePayload} {...common} />;
+      case "average_positions": return <AveragePositionsCard payload={p as unknown as AveragePositionsPayload} {...common} />;
+      case "match_stats":   return <MatchStatsCard payload={p as unknown as MatchStatsPayload} {...common} />;
+      case "player_stats":  return <PlayerStatsCard payload={p as unknown as PlayerStatsPayload} {...common} />;
+      case "broadcasts":    return <BroadcastsCard payload={p as unknown as BroadcastsPayload} {...common} />;
       case "match_preview": return <MatchPreviewCard payload={p as unknown as MatchPreviewPayload} {...common} />;
       default:              return <CustomCard title={card.title} payload={p} {...common} />;
     }
@@ -481,6 +679,15 @@ interface CommonProps { size: Size; index: number; narrow?: boolean; theme: Leag
 
 /* ── shared pieces ─────────────────────────────────────────────────────── */
 
+/** Card titles that older cards pass as English literals; shown in the overlay language. */
+const TITLE_KEYS: Record<string, MsgKey> = {
+  "Standings": "card.standings", "Preview": "card.preview", "Match preview": "card.matchPreview",
+  "Match forecast": "card.prediction", "Momentum": "card.momentum", "Team of the Season": "card.bestXI",
+  "Player ratings": "card.playerRatings", "Where to watch": "card.broadcasts", "xG race": "card.xgRace",
+  "Match stats": "card.matchStats", "Betting odds": "card.odds", "Average positions": "card.avgPositions",
+  "Top assists": "card.assists", "Top scorers": "card.scorers",
+};
+
 function Frame({
   type, subtitle, size, index, theme, glow, children,
 }: {
@@ -493,54 +700,19 @@ function Frame({
   children: ReactNode;
 }) {
   const m = METRICS[size];
-  const { tone } = useOverlayEnv();
-  const { lang } = useI18n();
+  const { t } = useI18n();
+  const title = TITLE_KEYS[type] ? t(TITLE_KEYS[type]) : type;
   return (
-    <section
-      className="ov-card-in relative flex min-h-0 flex-col overflow-hidden border border-white/10 backdrop-blur-xl"
-      style={{
-        borderRadius: m.pad, background: "var(--ov-surface)", boxShadow: "var(--ov-shadow)",
-        ["--ov-delay" as string]: `${index * 140}ms`,
-      } as CSSProperties}
+    <BroadcastPanel
+      type={title}
+      subtitle={subtitle}
+      theme={theme}
+      scale={{ pad: m.pad, label: m.label, small: m.small, gap: m.gap }}
+      index={index}
+      glow={glow}
     >
-      <div
-        className="pointer-events-none absolute inset-0"
-        style={{ background: `linear-gradient(135deg, ${alpha(theme.primary, tone === "dark" ? 0.6 : 0.14)} 0%, transparent 58%)` }}
-      />
-      {glow && (
-        <div
-          className="pointer-events-none absolute inset-0"
-          style={{
-            background: `radial-gradient(60% 90% at 0% 55%, ${alpha(glow[0], 0.26)}, transparent 70%), radial-gradient(60% 90% at 100% 55%, ${alpha(glow[1], 0.26)}, transparent 70%)`,
-          }}
-        />
-      )}
-      <div className="relative shrink-0" style={{ height: 7, background: themeGradient(theme) }} />
-      <header
-        className="relative flex shrink-0 items-center justify-between gap-4"
-        style={{ padding: `${m.pad * 0.6}px ${m.pad}px 0` }}
-      >
-        <span
-          className="flex items-center gap-3 font-extrabold uppercase"
-          style={{ fontSize: m.label, letterSpacing: "0.2em", color: theme.accent }}
-        >
-          <span className="inline-block rounded-full" style={{ width: m.label * 0.5, height: m.label * 0.5, background: theme.accent }} />
-          {type}
-        </span>
-        <span className="flex min-w-0 items-center gap-3">
-          {subtitle && (
-            <span className="truncate font-medium text-white/65" style={{ fontSize: m.small }}>{competitionLabel(subtitle, lang)}</span>
-          )}
-          {theme.id !== "default" && <LeagueBadge theme={theme} size={Math.round(m.label * 1.8)} />}
-        </span>
-      </header>
-      <div
-        className="relative min-h-0 flex-1"
-        style={{ padding: `${m.gap}px ${m.pad}px ${m.pad * 0.8}px` }}
-      >
-        {children}
-      </div>
-    </section>
+      {children}
+    </BroadcastPanel>
   );
 }
 
@@ -778,6 +950,7 @@ const ZONE_COLORS: Record<string, string> = {
 
 function StandingsCard({ theme, payload, size, index, home, away }: CommonProps & { payload: StandingsPayload }) {
   const m = METRICS[size];
+  const { t, lang } = useI18n();
   const rows = payload.rows.slice(0, m.rows.standings);
   
   // Choose columns based on size
@@ -794,11 +967,11 @@ function StandingsCard({ theme, payload, size, index, home, away }: CommonProps 
           style={{ gridTemplateColumns: cols, fontSize: m.small * 0.9, letterSpacing: "0.15em" }}
         >
           <span>#</span>
-          <span>Team</span>
-          <span className="text-right">P</span>
-          {showExtras && <span className="text-right">GD</span>}
-          {showExtras && <span className="text-right">W-D-L</span>}
-          <span className="text-right">Pts</span>
+          <span>{t("card.team")}</span>
+          <span className="text-right">{t("card.played")}</span>
+          {showExtras && <span className="text-right">{t("card.gd")}</span>}
+          {showExtras && <span className="text-right">{t("card.wdl")}</span>}
+          <span className="text-right">{t("card.points")}</span>
         </div>
         <ul className="min-h-0 flex-1 overflow-hidden">
           {rows.map((r) => {
@@ -827,7 +1000,7 @@ function StandingsCard({ theme, payload, size, index, home, away }: CommonProps 
               >
                 <span className="font-bold tabular-nums text-white/60 pl-1">{r.position}</span>
                 <span className={`truncate ${mine ? "font-extrabold text-white" : "font-medium text-white/90"}`}>
-                  {r.team}
+                  {localTeamName(r.team, lang)}
                 </span>
                 <span className="text-right tabular-nums text-white/70">{r.played}</span>
                 {showExtras && (
@@ -851,16 +1024,17 @@ function StandingsCard({ theme, payload, size, index, home, away }: CommonProps 
 
 function MatchPreviewCard({ theme, payload, size, index }: CommonProps & { payload: MatchPreviewPayload }) {
   const m = METRICS[size];
+  const { t } = useI18n();
 
   if (payload.unavailable && !payload.preview && !payload.venue) {
     return (
       <Frame theme={theme} type="Preview" size={size} index={index}>
         <div className="flex h-full flex-col items-center justify-center text-center" style={{ gap: m.gap }}>
           <div className="font-extrabold uppercase text-white/60" style={{ fontSize: m.body }}>
-            No preview available
+            {t("card.noPreview")}
           </div>
           <div className="text-white/40" style={{ fontSize: m.small }}>
-            Match preview data isn&apos;t available for this fixture yet.
+            {t("card.noPreviewBody")}
           </div>
         </div>
       </Frame>
@@ -880,10 +1054,10 @@ function MatchPreviewCard({ theme, payload, size, index }: CommonProps & { paylo
     );
   }
   if (payload.referee) {
-    metaBits.push(`Referee: ${payload.referee}`);
+    metaBits.push(t("card.referee", { name: payload.referee }));
   }
   if (payload.attendance != null) {
-    metaBits.push(`${payload.attendance.toLocaleString()} attendance`);
+    metaBits.push(t("card.attendance", { n: payload.attendance.toLocaleString() }));
   }
 
   // Truncate preview to fit at each size
@@ -1092,18 +1266,68 @@ function FormCard({ theme, payload, size, index, home, away }: CommonProps & { p
   );
 }
 
+// Define ProbBar OUTSIDE the component
+function ProbBar({
+  label,
+  probs,
+  accentBar,
+  theme,
+  m,
+}: {
+  label: string;
+  probs: { home: number; draw: number; away: number };
+  accentBar?: string;
+  theme: LeagueTheme;
+  m: Metrics;
+}) {
+  const t = probs.home + probs.draw + probs.away || 1;
+  const hp = (probs.home / t) * 100;
+  const dp = (probs.draw / t) * 100;
+  const ap = (probs.away / t) * 100;
+  const pct = (v: number) => Math.round(v * 100);
+
+  return (
+    <div className="flex flex-col gap-1">
+      <div
+        className="flex items-center justify-between text-white/55 uppercase"
+        style={{ fontSize: m.small * 0.8, letterSpacing: "0.1em" }}
+      >
+        <span>{label}</span>
+      </div>
+      <div className="flex h-10 overflow-hidden rounded-lg bg-white/10">
+        <div
+          className="flex items-center justify-center font-bold text-white"
+          style={{ width: `${hp}%`, background: accentBar || themeGradient(theme) }}
+        >
+          {pct(probs.home)}%
+        </div>
+        <div
+          className="flex items-center justify-center font-bold text-white/85"
+          style={{ width: `${dp}%`, background: "rgba(161,161,170,0.7)" }}
+        >
+          {pct(probs.draw)}%
+        </div>
+        <div
+          className="flex items-center justify-center font-bold text-white"
+          style={{ width: `${ap}%`, background: alpha(theme.accent, 0.85) }}
+        >
+          {pct(probs.away)}%
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Now the main card
 function PredictionCard({ theme, payload, size, index }: CommonProps & { payload: PredictionPayload }) {
   const m = METRICS[size];
   const { t, lang } = useI18n();
-  const market = payload.markets?.["1x2"];
 
-  if (!market) {
+  if (payload.unavailable || (!payload.model && !payload.market)) {
     return (
-      <Frame theme={theme} type={t("card.prediction")} size={size} index={index}>
+      <Frame theme={theme} type="Match forecast" size={size} index={index}>
         <div className="flex h-full flex-col items-center justify-center text-center text-white/60" style={{ gap: m.gap }}>
-          <div style={{ fontSize: m.body }}>
-            {t("card.noPrediction")}
-          </div>
+          <div style={{ fontSize: m.body }}>{t("card.noPrediction")}</div>
           <div className="text-white/40" style={{ fontSize: m.small }}>
             {payload.reason || t("card.availableLater")}
           </div>
@@ -1112,89 +1336,124 @@ function PredictionCard({ theme, payload, size, index }: CommonProps & { payload
     );
   }
 
-  const { home, draw, away } = market;
-  const total = home + draw + away || 1;
-  const pct = (v: number) => Math.round((v / total) * 100);
+  const pct = (v: number) => Math.round(v * 100);
+  const hasBoth = !!(payload.model && payload.market);
 
   return (
     <Frame
       theme={theme}
-      type={t("card.prediction")}
+      type="Match forecast"
       subtitle={payload.competition}
       size={size}
       index={index}
     >
       <div className="flex h-full flex-col" style={{ gap: m.gap }}>
-        {/* Header row: team names */}
-        <div className="flex items-center justify-between font-extrabold uppercase text-white" style={{ fontSize: m.body * 0.85, letterSpacing: "0.05em" }}>
-          <span className="truncate">{localTeamName(payload.home_name, lang)}</span>
-          <span className="text-white/40">{t("common.vs")}</span>
-          <span className="truncate text-right">{localTeamName(payload.away_name, lang)}</span>
+        {/* Header: team names + kickoff */}
+        <div
+          className="flex items-center justify-between border-b border-white/10 pb-2 font-extrabold uppercase"
+          style={{ fontSize: m.body * 0.85 }}
+        >
+          <span className="truncate max-w-[35%]" style={{ color: payload.home_color || "#fff" }}>
+            {localTeamName(payload.home_name, lang)}
+          </span>
+          <span className="shrink-0 text-center text-white/45" style={{ fontSize: m.body * 0.65 }}>
+            {payload.kickoff_label || "vs"}
+          </span>
+          <span className="truncate max-w-[35%] text-right" style={{ color: payload.away_color || "#fff" }}>
+            {localTeamName(payload.away_name, lang)}
+          </span>
         </div>
 
-        {/* Probability bar */}
-        <div className="flex h-14 overflow-hidden rounded-2xl bg-white/10" style={{ fontSize: m.body }}>
-          <div
-            className="flex items-center justify-center font-black text-[#fff]"
-            style={{ width: `${pct(home)}%`, background: themeGradient(theme) }}
-          >
-            {pct(home)}%
-          </div>
-          <div
-            className="flex items-center justify-center font-black text-[#fff]/85"
-            style={{ width: `${pct(draw)}%`, background: "rgba(161,161,170,0.7)" }}
-          >
-            {pct(draw)}%
-          </div>
-          <div
-            className="flex items-center justify-center font-black text-[#fff]"
-            style={{ width: `${pct(away)}%`, background: alpha(theme.accent, 0.85) }}
-          >
-            {pct(away)}%
-          </div>
-        </div>
+        {/* Market bar (if available) */}
+        {payload.market && (
+          <ProbBar
+            label="Market · consensus odds"
+            probs={payload.market}
+            accentBar={`linear-gradient(90deg, ${theme.secondary}, ${theme.primary})`}
+            theme={theme}
+            m={m}
+          />
+        )}
 
-        {/* Labels under the bar */}
-        <div className="flex justify-between font-semibold text-white/70" style={{ fontSize: m.small }}>
+        {/* Model bar (if available) */}
+        {payload.model && (
+          <ProbBar
+            label={`Model · ${payload.model.version ?? "v1"}${payload.model.confidence != null ? ` · ${(payload.model.confidence * 100).toFixed(0)}% conf` : ""}`}
+            probs={payload.model}
+            theme={theme}
+            m={m}
+          />
+        )}
+
+        {/* Labels under the bars */}
+        <div className="flex items-center justify-between text-white/55" style={{ fontSize: m.small * 0.9 }}>
           <span>{t("card.home")}</span>
           <span>{t("card.draw")}</span>
           <span>{t("card.away")}</span>
         </div>
 
         {/* Secondary markets: O/U 2.5 + BTTS */}
-        {(payload.markets.over_under_25 || payload.markets.btts) && size !== "sm" && size !== "xs" && (
-          <div className="grid grid-cols-2 gap-x-8 border-t border-white/10 pt-3" style={{ fontSize: m.small }}>
-            {payload.markets.over_under_25 && (
+        {(payload.model || payload.market) && size !== "xs" && (
+          <div className="grid grid-cols-2 gap-x-6 border-t border-white/10 pt-2" style={{ fontSize: m.small }}>
+            {(payload.model?.over_25 != null || payload.market?.over_25 != null) && (
               <div>
-                <div className="text-white/45 uppercase" style={{ letterSpacing: "0.15em", fontSize: m.small * 0.85 }}>{t("card.goals25")}</div>
-                <div className="mt-1 flex justify-between text-white/85">
-                  <span>{t("card.over")} · <span className="tabular-nums font-bold">{pct(payload.markets.over_under_25.over ?? 0)}%</span></span>
-                  <span>{t("card.under")} · <span className="tabular-nums font-bold">{pct(payload.markets.over_under_25.under ?? 0)}%</span></span>
+                <div className="text-white/45 uppercase" style={{ letterSpacing: "0.15em", fontSize: m.small * 0.8 }}>
+                  {t("card.goals25")}
+                </div>
+                <div className="mt-0.5 flex gap-3 text-white/85">
+                  {payload.market?.over_25 != null && (
+                    <span>
+                      Mkt · <span className="font-bold tabular-nums">{pct(payload.market.over_25)}%</span>
+                    </span>
+                  )}
+                  {payload.model?.over_25 != null && (
+                    <span>
+                      Model · <span className="font-bold tabular-nums">{pct(payload.model.over_25)}%</span>
+                    </span>
+                  )}
                 </div>
               </div>
             )}
-            {payload.markets.btts && (
+            {(payload.model?.btts_yes != null || payload.market?.btts_yes != null) && (
               <div>
-                <div className="text-white/45 uppercase" style={{ letterSpacing: "0.15em", fontSize: m.small * 0.85 }}>{t("card.btts")}</div>
-                <div className="mt-1 flex justify-between text-white/85">
-                  <span>{t("card.yes")} · <span className="tabular-nums font-bold">{pct(payload.markets.btts.yes ?? 0)}%</span></span>
-                  <span>{t("card.no")} · <span className="tabular-nums font-bold">{pct(payload.markets.btts.no ?? 0)}%</span></span>
+                <div className="text-white/45 uppercase" style={{ letterSpacing: "0.15em", fontSize: m.small * 0.8 }}>
+                  {t("card.btts")}
+                </div>
+                <div className="mt-0.5 flex gap-3 text-white/85">
+                  {payload.market?.btts_yes != null && (
+                    <span>
+                      Mkt · <span className="font-bold tabular-nums">{pct(payload.market.btts_yes)}%</span>
+                    </span>
+                  )}
+                  {payload.model?.btts_yes != null && (
+                    <span>
+                      Model · <span className="font-bold tabular-nums">{pct(payload.model.btts_yes)}%</span>
+                    </span>
+                  )}
                 </div>
               </div>
             )}
           </div>
         )}
 
-        {/* Footer: model version + "estimates only" */}
-        <div className="mt-auto flex items-center justify-between text-white/40" style={{ fontSize: m.small * 0.85 }}>
+        {/* xG line — only when the model provides it */}
+        {payload.model?.xg_home != null && payload.model?.xg_away != null && size !== "xs" && (
+          <div className="text-white/55" style={{ fontSize: m.small * 0.85 }}>
+            <span className="text-white/40 uppercase tracking-wider" style={{ fontSize: m.small * 0.75 }}>
+              Expected goals ·{" "}
+            </span>
+            <span className="font-bold text-white tabular-nums">
+              {payload.model.xg_home.toFixed(2)} — {payload.model.xg_away.toFixed(2)}
+            </span>
+          </div>
+        )}
+
+        {/* Footer */}
+        <div className="mt-auto flex items-center justify-between text-white/35" style={{ fontSize: m.small * 0.8 }}>
           <span>
-            {payload.model_version === "poisson-v1"
-              ? "Statistical model"
-              : payload.model_version === "market-consensus"
-              ? "Market consensus"
-              : payload.model_version ?? "Model probabilities"}
+            {hasBoth ? "Market vs model" : payload.market ? "Market only" : "Model only"}
           </span>
-          <span className="italic">{t("card.estimates")}</span>
+          <span className="italic">Estimates, not guarantees</span>
         </div>
       </div>
     </Frame>
@@ -1748,6 +2007,813 @@ function BestXICard({ theme, payload, size, index }: CommonProps & { payload: Be
             ))}
           </div>
         )}
+      </div>
+    </Frame>
+  );
+}
+
+function PlayerStatsCard({ theme, payload, size, index }: CommonProps & { payload: PlayerStatsPayload }) {
+  const m = METRICS[size];
+
+  if (payload.unavailable || payload.players.length === 0) {
+    return (
+      <Frame theme={theme} type="Player ratings" size={size} index={index}>
+        <div className="flex h-full items-center justify-center text-white/50" style={{ fontSize: m.body }}>
+          No player stats available
+        </div>
+      </Frame>
+    );
+  }
+
+  const ratingColor = (rating: number | string | null): string => {
+    if (rating == null) return "#71717a";
+    const n = typeof rating === "number" ? rating : parseFloat(rating);
+    if (Number.isNaN(n)) return "#71717a";
+    if (n >= 8.0) return "#34d399";
+    if (n >= 7.0) return "#38bdf8";
+    if (n >= 6.0) return "#fbbf24";
+    return "#f87171";
+  };
+
+  // Split players into two columns
+  const homePlayers = payload.players.filter(p => p.team === "home");
+  const awayPlayers = payload.players.filter(p => p.team === "away");
+
+  // Dynamic row height: fit up to 11 players comfortably
+  const maxRows = Math.max(homePlayers.length, awayPlayers.length, 1);
+  const rowHeight = Math.min(m.row, 420 / maxRows);
+
+  const renderColumn = (players: typeof payload.players, teamColor: string, teamName: string) => (
+    <div className="flex flex-1 flex-col min-w-0">
+      <div className="mb-1 flex items-center gap-1.5 border-b border-white/10 pb-1 font-extrabold uppercase" style={{ fontSize: m.small * 0.9 }}>
+        <span className="inline-block rounded-full" style={{ width: m.small * 0.6, height: m.small * 0.6, background: teamColor }} />
+        <span className="truncate" style={{ color: teamColor }}>{teamName}</span>
+      </div>
+      
+      <ul className="flex-1">
+        {players.map((p, i) => {
+          const rating = p.rating != null ? (typeof p.rating === "number" ? p.rating : parseFloat(p.rating)) : null;
+          return (
+            <li key={p.player_id ?? i} className="flex items-center gap-1.5 border-b border-white/5 py-0.5" style={{ height: rowHeight }}>
+              <span
+                className="flex shrink-0 items-center justify-center rounded font-black tabular-nums text-black"
+                style={{
+                  width: rowHeight * 0.9,
+                  height: rowHeight * 0.9,
+                  fontSize: rowHeight * 0.5,
+                  background: ratingColor(p.rating),
+                }}
+              >
+                {rating != null && !Number.isNaN(rating) ? rating.toFixed(1) : "—"}
+              </span>
+              <div className="min-w-0 flex-1 truncate font-bold text-white" style={{ fontSize: m.body * 0.7 }}>
+                {p.name}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+
+  return (
+    <Frame theme={theme} type="Player ratings" subtitle={payload.competition} size={size} index={index}>
+      <div className="flex h-full gap-4 overflow-hidden">
+        {renderColumn(homePlayers, payload.home_color, (payload as { home_short?: string }).home_short ?? "Home")}
+        <div className="w-px bg-white/10 shrink-0" />
+        {renderColumn(awayPlayers, payload.away_color, (payload as { away_short?: string }).away_short ?? "Away")}
+      </div>
+    </Frame>
+  );
+}
+
+const PLATFORM_ICON: Record<string, string> = {
+  tv: "📺",
+  streaming: "💻",
+  radio: "📻",
+};
+
+function BroadcastsCard({ theme, payload, size, index }: CommonProps & { payload: BroadcastsPayload }) {
+  const m = METRICS[size];
+
+  if (payload.unavailable || Object.keys(payload.by_country).length === 0) {
+    return (
+      <Frame theme={theme} type="Where to watch" size={size} index={index}>
+        <div className="flex h-full flex-col items-center justify-center text-center" style={{ gap: m.gap }}>
+          <div className="font-extrabold uppercase text-white/60" style={{ fontSize: m.body }}>
+            No broadcast info
+          </div>
+          <div className="text-white/40" style={{ fontSize: m.small }}>
+            TV listings aren&apos;t available for this fixture yet.
+          </div>
+        </div>
+      </Frame>
+    );
+  }
+
+  // 1. Prioritize Major Markets + Alphabetical for the rest
+  const PRIORITY_COUNTRIES = ["GB", "US", "FR", "DE", "ES", "IT", "NL", "PT", "BR", "AR", "MX", "AU"];
+  
+  const allCountries = Object.values(payload.by_country).sort((a, b) => {
+    const aIdx = PRIORITY_COUNTRIES.indexOf(a.country_code);
+    const bIdx = PRIORITY_COUNTRIES.indexOf(b.country_code);
+    
+    // If both are in the priority list, sort by their order in the list
+    if (aIdx !== -1 && bIdx !== -1) return aIdx - bIdx;
+    // Priority countries always come first
+    if (aIdx !== -1) return -1;
+    if (bIdx !== -1) return 1;
+    // Otherwise sort alphabetically by country name
+    return (a.country_name || "").localeCompare(b.country_name || "");
+  });
+
+  // 2. Show more countries since the layout is compact
+  const maxCountries =
+    size === "xs" ? 2 :
+    size === "sm" ? 4 :
+    size === "md" ? 6 :
+    8;
+
+  const countries = allCountries.slice(0, maxCountries);
+  const remaining = allCountries.length - countries.length;
+
+  return (
+    <Frame
+      theme={theme}
+      type="Where to watch"
+      subtitle={payload.competition}
+      size={size}
+      index={index}
+      glow={[payload.home_color, payload.away_color]}
+    >
+      <div className="flex h-full flex-col">
+        {/* Match header — use full names instead of shorts */}
+        <div
+          className="mb-2 flex items-center justify-between border-b border-white/10 pb-2 font-extrabold"
+          style={{ fontSize: m.body * 0.75 }}
+        >
+          <span className="truncate max-w-[35%]" style={{ color: payload.home_color }}>
+            {payload.home_name}
+          </span>
+          <span className="text-white/50 text-center shrink-0 px-2" style={{ fontSize: m.small * 0.9 }}>
+            {payload.kickoff_label || "TBD"}
+          </span>
+          <span className="truncate max-w-[35%] text-right" style={{ color: payload.away_color }}>
+            {payload.away_name}
+          </span>
+        </div>
+
+        {/* Country groups - Compact grid layout */}
+        <div className="grid grid-cols-2 gap-x-4 gap-y-2 flex-1 overflow-hidden content-start">
+          {countries.map((country) => (
+            <div key={country.country_code} className="flex flex-col min-w-0">
+              <div
+                className="mb-0.5 flex items-center gap-1.5 font-bold uppercase tracking-wider"
+                style={{ fontSize: m.small * 0.8, color: theme.accent }}
+              >
+                <span>{country.country_code}</span>
+                <span className="text-white/50 font-medium normal-case truncate">
+                  {country.country_name}
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {country.channels.slice(0, 2).map((ch, i) => (
+                  <span
+                    key={i}
+                    className="rounded px-1.5 py-0.5 font-medium text-white truncate max-w-full"
+                    style={{
+                      fontSize: m.small * 0.75,
+                      background: alpha(theme.accent, 0.15),
+                    }}
+                  >
+                    {ch.name}
+                  </span>
+                ))}
+                {country.channels.length > 2 && (
+                  <span
+                    className="rounded px-1.5 py-0.5 text-white/40"
+                    style={{ fontSize: m.small * 0.75 }}
+                  >
+                    +{country.channels.length - 2}
+                  </span>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Footer: total count */}
+        {remaining > 0 && (
+          <div
+            className="mt-2 border-t border-white/10 pt-1 text-right text-white/40"
+            style={{ fontSize: m.small * 0.8 }}
+          >
+            +{remaining} more countries
+          </div>
+        )}
+      </div>
+    </Frame>
+  );
+}
+
+function OddBox({ 
+  label, value, m, theme, accent 
+}: { 
+  label: string; value?: number; m: Metrics; theme: LeagueTheme; accent?: boolean 
+}) {
+  if (value == null) return null;
+  return (
+    <div
+      className="flex flex-1 flex-col items-center justify-center rounded bg-white/5 py-1.5"
+      style={{ border: accent ? `1px solid ${theme.accent}` : "1px solid transparent" }}
+    >
+      <span className="text-white/50 uppercase" style={{ fontSize: m.small * 0.75 }}>{label}</span>
+      <span className="font-bold tabular-nums text-white" style={{ fontSize: m.body * 0.9 }}>
+        {value.toFixed(2)}
+      </span>
+    </div>
+  );
+}
+
+function XGRaceCard({ theme, payload, size, index }: CommonProps & { payload: XGRacePayload }) {
+  const m = METRICS[size];
+
+  if (payload.unavailable || payload.samples.length < 2) {
+    return (
+      <Frame theme={theme} type="xG race" size={size} index={index}>
+        <div className="flex h-full flex-col items-center justify-center text-center" style={{ gap: m.gap }}>
+          <div className="font-extrabold uppercase text-white/60" style={{ fontSize: m.body }}>
+            No xG data
+          </div>
+          <div className="text-white/40" style={{ fontSize: m.small }}>
+            xG curve isn&apos;t available for this match yet.
+          </div>
+        </div>
+      </Frame>
+    );
+  }
+
+  const samples = payload.samples;
+  const maxMinute = Math.max(90, ...samples.map((s) => s.minute));
+  const maxXG = Math.max(
+    1,
+    ...samples.map((s) => Math.max(s.home, s.away)),
+    payload.home_xg_final ?? 0,
+    payload.away_xg_final ?? 0,
+  );
+
+  // SVG dimensions
+  const W = 100;
+  const H = 40;
+  const padL = 2;
+  const padR = 2;
+  const padT = 2;
+  const padB = 2;
+  const plotW = W - padL - padR;
+  const plotH = H - padT - padB;
+
+  const xOf = (minute: number) => padL + (minute / maxMinute) * plotW;
+  const yOf = (xg: number) => padT + plotH - (xg / maxXG) * plotH;
+
+  // Build SVG polyline paths
+  const buildPath = (side: "home" | "away") => {
+    // Start at 0 xG at minute 0 so the line begins at the bottom-left
+    const points = [{ minute: 0, xg: 0 }, ...samples.map((s) => ({ minute: s.minute, xg: s[side] }))];
+    return points
+      .map((p, i) => `${i === 0 ? "M" : "L"}${xOf(p.minute).toFixed(2)},${yOf(p.xg).toFixed(2)}`)
+      .join(" ");
+  };
+
+  // Check if any sample is estimated (for the disclaimer badge)
+  const hasEstimated = samples.some((s) => s.estimated);
+
+  // Gridlines at 25%, 50%, 75% of max xG
+  const gridLevels = [0.25, 0.5, 0.75, 1.0];
+
+  return (
+    <Frame theme={theme} type="xG race" subtitle={payload.competition} size={size} index={index}>
+      <div className="flex h-full flex-col" style={{ gap: m.gap * 0.6 }}>
+        {/* Header with final xG values */}
+        <div className="flex items-center justify-between font-extrabold uppercase" style={{ fontSize: m.body * 0.85 }}>
+          <span className="flex items-center gap-2">
+            <span
+              className="inline-block rounded-full"
+              style={{ width: m.small * 0.7, height: m.small * 0.7, background: payload.home_color }}
+            />
+            <span style={{ color: payload.home_color }}>{payload.home_short}</span>
+            {payload.home_xg_final != null && (
+              <span className="text-white/80 tabular-nums">
+                {payload.home_xg_final.toFixed(2)}
+              </span>
+            )}
+          </span>
+          <span className="text-white/40" style={{ fontSize: m.small * 0.85 }}>
+            xG
+          </span>
+          <span className="flex items-center gap-2">
+            {payload.away_xg_final != null && (
+              <span className="text-white/80 tabular-nums">
+                {payload.away_xg_final.toFixed(2)}
+              </span>
+            )}
+            <span style={{ color: payload.away_color }}>{payload.away_short}</span>
+            <span
+              className="inline-block rounded-full"
+              style={{ width: m.small * 0.7, height: m.small * 0.7, background: payload.away_color }}
+            />
+          </span>
+        </div>
+
+        {/* The chart */}
+        <div className="relative flex-1" style={{ minHeight: 0 }}>
+          <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="h-full w-full">
+            {/* Horizontal gridlines */}
+            {gridLevels.map((level) => (
+              <line
+                key={level}
+                x1={padL}
+                y1={yOf(maxXG * level)}
+                x2={W - padR}
+                y2={yOf(maxXG * level)}
+                stroke="white"
+                strokeOpacity={level === 1 ? 0.2 : 0.08}
+                strokeWidth="0.15"
+                strokeDasharray={level === 1 ? "0" : "0.5 0.5"}
+              />
+            ))}
+
+            {/* Half-time marker */}
+            <line
+              x1={xOf(45)}
+              y1={padT}
+              x2={xOf(45)}
+              y2={H - padB}
+              stroke="white"
+              strokeOpacity="0.15"
+              strokeWidth="0.2"
+              strokeDasharray="0.4 0.4"
+            />
+
+            {/* Home xG curve */}
+            <path
+              d={buildPath("home")}
+              fill="none"
+              stroke={payload.home_color}
+              strokeWidth="0.8"
+              strokeLinejoin="round"
+              strokeLinecap="round"
+            />
+
+            {/* Away xG curve */}
+            <path
+              d={buildPath("away")}
+              fill="none"
+              stroke={payload.away_color}
+              strokeWidth="0.8"
+              strokeLinejoin="round"
+              strokeLinecap="round"
+            />
+
+            {/* End-of-line dots */}
+            {samples.length > 0 && (
+              <>
+                <circle
+                  cx={xOf(samples[samples.length - 1].minute)}
+                  cy={yOf(samples[samples.length - 1].home)}
+                  r="0.7"
+                  fill={payload.home_color}
+                />
+                <circle
+                  cx={xOf(samples[samples.length - 1].minute)}
+                  cy={yOf(samples[samples.length - 1].away)}
+                  r="0.7"
+                  fill={payload.away_color}
+                />
+              </>
+            )}
+          </svg>
+
+          {/* Minute axis labels */}
+          <div
+            className="mt-1 flex justify-between text-white/40"
+            style={{ fontSize: m.small * 0.8 }}
+          >
+            <span>0&apos;</span>
+            <span>45&apos;</span>
+            <span>{maxMinute}&apos;</span>
+          </div>
+        </div>
+
+        {/* Footer with estimated flag if applicable */}
+        <div className="flex items-center justify-between text-white/35" style={{ fontSize: m.small * 0.75 }}>
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block h-0.5 w-4" style={{ background: payload.home_color }} />
+            {payload.home_short}
+            <span className="inline-block h-0.5 w-4 ml-2" style={{ background: payload.away_color }} />
+            {payload.away_short}
+          </span>
+          {hasEstimated && <span className="italic">Includes estimated xG</span>}
+        </div>
+      </div>
+    </Frame>
+  );
+}
+
+function MatchStatsCard({ theme, payload, size, index }: CommonProps & { payload: MatchStatsPayload }) {
+  const m = METRICS[size];
+
+  if (payload.unavailable || payload.stats.length === 0) {
+    return (
+      <Frame theme={theme} type="Match stats" size={size} index={index}>
+        <div className="flex h-full flex-col items-center justify-center text-center" style={{ gap: m.gap }}>
+          <div className="font-extrabold uppercase text-white/60" style={{ fontSize: m.body }}>
+            No stats
+          </div>
+          <div className="text-white/40" style={{ fontSize: m.small }}>
+            Match statistics aren&apos;t available yet.
+          </div>
+        </div>
+      </Frame>
+    );
+  }
+
+  const formatValue = (v: number, fmt: StatRow["format"]): string => {
+    if (fmt === "percent") return `${Math.round(v)}%`;
+    if (fmt === "decimal") return v.toFixed(2);
+    return String(Math.round(v));
+  };
+
+  // How many rows to show depending on card size
+  const maxRows =
+    size === "xs" ? 3 :
+    size === "sm" ? 4 :
+    size === "md" ? 6 :
+    8;
+
+  const visible = payload.stats.slice(0, maxRows);
+
+  return (
+    <Frame theme={theme} type="Match stats" subtitle={payload.competition} size={size} index={index}>
+      <div className="flex h-full flex-col" style={{ gap: m.gap * 0.7 }}>
+        {/* Team header */}
+        <div
+          className="flex items-center justify-between border-b border-white/10 pb-2 font-extrabold uppercase"
+          style={{ fontSize: m.body * 0.85 }}
+        >
+          <span className="truncate max-w-[40%]" style={{ color: payload.home_color }}>
+            {payload.home_short}
+          </span>
+          <span className="shrink-0 text-white/40" style={{ fontSize: m.body * 0.6 }}>
+            {formatMatchPhase(undefined)}
+          </span>
+          <span className="truncate max-w-[40%] text-right" style={{ color: payload.away_color }}>
+            {payload.away_short}
+          </span>
+        </div>
+
+        {/* Stat rows */}
+        <div className="flex min-h-0 flex-1 flex-col justify-start overflow-hidden" style={{ gap: m.gap * 0.5 }}>
+          {visible.map((row) => {
+            const total = row.home + row.away || 1;
+            const homePct = (row.home / total) * 100;
+            const awayPct = 100 - homePct;
+
+            // Colour: green if the higher value belongs to a "good" stat
+            const homeWins = row.higher_is_better === true && row.home > row.away;
+            const awayWins = row.higher_is_better === true && row.away > row.home;
+            const homeColor = homeWins ? "#34d399" : "#ffffff";
+            const awayColor = awayWins ? "#34d399" : "#ffffff";
+
+            return (
+              <div key={row.key} className="flex flex-col" style={{ gap: 2 }}>
+                {/* Values + label */}
+                <div
+                  className="flex items-baseline justify-between"
+                  style={{ fontSize: m.body * 0.8 }}
+                >
+                  <span
+                    className="font-black tabular-nums"
+                    style={{ color: homeColor, fontSize: m.body * 0.95 }}
+                  >
+                    {formatValue(row.home, row.format)}
+                  </span>
+                  <span
+                    className="font-semibold uppercase text-white/55"
+                    style={{ fontSize: m.small * 0.85, letterSpacing: "0.1em" }}
+                  >
+                    {row.label}
+                  </span>
+                  <span
+                    className="font-black tabular-nums"
+                    style={{ color: awayColor, fontSize: m.body * 0.95 }}
+                  >
+                    {formatValue(row.away, row.format)}
+                  </span>
+                </div>
+
+                {/* Comparison bar */}
+                <div className="flex h-1.5 overflow-hidden rounded-full bg-white/10">
+                  <div
+                    style={{
+                      width: `${homePct}%`,
+                      background: payload.home_color,
+                      opacity: homeWins ? 0.95 : 0.7,
+                    }}
+                  />
+                  <div
+                    style={{
+                      flex: 1,
+                      background: payload.away_color,
+                      opacity: awayWins ? 0.95 : 0.7,
+                    }}
+                  />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Footer */}
+        <div className="mt-auto flex justify-between text-white/30" style={{ fontSize: m.small * 0.75 }}>
+          <span>Stats via Bzzoiro</span>
+          <span>{payload.stats.length} metrics</span>
+        </div>
+      </div>
+    </Frame>
+  );
+}
+
+// Helper — returns a text label for the current phase (nice to have)
+function formatMatchPhase(_phase: string | undefined): string {
+  return "Match stats";
+}
+
+function OddsBoardCard({ theme, payload, size, index }: CommonProps & { payload: OddsBoardPayload }) {
+  const m = METRICS[size];
+
+  if (payload.unavailable) {
+    return (
+      <Frame theme={theme} type="Betting odds" size={size} index={index}>
+        <div className="flex h-full items-center justify-center text-white/50" style={{ fontSize: m.body }}>
+          No odds available
+        </div>
+      </Frame>
+    );
+  }
+
+  const { markets } = payload;
+
+  return (
+    <Frame theme={theme} type="Betting odds" subtitle={payload.competition} size={size} index={index}>
+      <div className="flex h-full flex-col gap-3">
+        
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-white/10 pb-1.5 font-extrabold uppercase" style={{ fontSize: m.body * 0.75 }}>
+          <span style={{ color: payload.home_color }}>{payload.home_short}</span>
+          <span className="text-white/40">Consensus</span>
+          <span style={{ color: payload.away_color }}>{payload.away_short}</span>
+        </div>
+
+        {/* 1X2 */}
+        {markets["1x2"] && (
+          <div className="flex gap-2">
+            <OddBox label="Home" value={markets["1x2"].home} m={m} theme={theme} />
+            <OddBox label="Draw" value={markets["1x2"].draw} m={m} theme={theme} />
+            <OddBox label="Away" value={markets["1x2"].away} m={m} theme={theme} />
+          </div>
+        )}
+
+        {/* Double Chance & BTTS */}
+        <div className="flex gap-4">
+          {markets.double_chance && (
+            <div className="flex flex-1 flex-col gap-1">
+              <span className="text-white/40 uppercase" style={{ fontSize: m.small * 0.75 }}>Double Chance</span>
+              <div className="flex gap-1">
+                <OddBox label="1X" value={markets.double_chance["1X"]} m={m} theme={theme} />
+                <OddBox label="12" value={markets.double_chance["12"]} m={m} theme={theme} />
+                <OddBox label="X2" value={markets.double_chance["X2"]} m={m} theme={theme} />
+              </div>
+            </div>
+          )}
+          
+          {markets.btts && (
+            <div className="flex flex-1 flex-col gap-1">
+              <span className="text-white/40 uppercase" style={{ fontSize: m.small * 0.75 }}>BTTS</span>
+              <div className="flex gap-1">
+                <OddBox label="Yes" value={markets.btts.yes} m={m} theme={theme} />
+                <OddBox label="No" value={markets.btts.no} m={m} theme={theme} />
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Totals */}
+        {markets.totals && (
+          <div className="flex flex-col gap-1">
+             <span className="text-white/40 uppercase" style={{ fontSize: m.small * 0.75 }}>Total Goals (Over / Under)</span>
+             <div className="flex flex-wrap gap-2">
+               {Object.entries(markets.totals).map(([line, mkt]) => (
+                 <div key={line} className="flex flex-1 items-center gap-1 rounded border border-white/10 bg-white/5 px-2 py-1">
+                   <span className="font-bold text-white/80" style={{ fontSize: m.small }}>{line}</span>
+                   <span className="ml-auto tabular-nums text-emerald-400" style={{ fontSize: m.small }}>{mkt.over?.toFixed(2)}</span>
+                   <span className="text-white/30" style={{ fontSize: m.small }}>/</span>
+                   <span className="tabular-nums text-rose-400" style={{ fontSize: m.small }}>{mkt.under?.toFixed(2)}</span>
+                 </div>
+               ))}
+             </div>
+          </div>
+        )}
+
+        {/* Footer */}
+        <div className="mt-auto flex justify-between text-white/30" style={{ fontSize: m.small * 0.75 }}>
+          <span>Decimal odds</span>
+          <span>Pre-match only</span>
+        </div>
+      </div>
+    </Frame>
+  );
+}
+
+function AveragePositionsCard({ theme, payload, size, index }: CommonProps & { payload: AveragePositionsPayload }) {
+  const m = METRICS[size];
+
+  if (payload.unavailable || (payload.home_positions.length === 0 && payload.away_positions.length === 0)) {
+    return (
+      <Frame theme={theme} type="Average positions" size={size} index={index}>
+        <div className="flex h-full flex-col items-center justify-center text-center" style={{ gap: m.gap }}>
+          <div className="font-extrabold uppercase text-white/60" style={{ fontSize: m.body }}>
+            No position data
+          </div>
+          <div className="text-white/40" style={{ fontSize: m.small }}>
+            Bzzoiro hasn&apos;t published per-player positions for this match yet.
+          </div>
+        </div>
+      </Frame>
+    );
+  }
+
+  // --- Player dot rendering ---
+  // We show a full pitch (horizontal). Home team on left half (attacking right),
+  // away team on right half (attacking left).
+  //
+  // Bzzoiro's x/y are 0..100 in the SHOOTING team's attacking direction:
+  //   x=0 is own goal, x=100 is opponent goal
+  //   y=0 is one touchline, y=100 is the other
+  // So home team's x=50 is halfway, x=90 is deep in the opponent's half.
+  // For display, home team goes on the left half of our 0..100 pitch:
+  //   display_x = x * 0.5  (0..50)
+  // Away team mirrors on the right half:
+  //   display_x = 100 - x * 0.5  (50..100)
+
+  const W = 100;
+  const H = 64;
+
+  // Convert a position to display coordinates
+  const homePos = (p: AveragePosition) => ({
+    x: p.x * 0.5,
+    y: p.y * 0.64,  // scale to SVG height (0..64)
+  });
+
+  const awayPos = (p: AveragePosition) => ({
+    x: 100 - p.x * 0.5,
+    y: p.y * 0.64,
+  });
+
+  // Dot radius scales with involvement (n touches)
+  const maxN = Math.max(
+    1,
+    ...payload.home_positions.map((p) => p.n),
+    ...payload.away_positions.map((p) => p.n),
+  );
+  const radius = (n: number) => {
+    const minR = 1.2;
+    const maxR = 2.6;
+    const t = maxN > 0 ? n / maxN : 0;
+    return minR + (maxR - minR) * t;
+  };
+
+  return (
+    <Frame
+      theme={theme}
+      type="Average positions"
+      subtitle={payload.competition}
+      size={size}
+      index={index}
+    >
+      <div className="flex h-full flex-col" style={{ gap: m.gap * 0.6 }}>
+        {/* Team header */}
+        <div
+          className="flex items-center justify-between font-extrabold uppercase"
+          style={{ fontSize: m.body * 0.85 }}
+        >
+          <span className="flex items-center gap-2">
+            <span
+              className="inline-block rounded-full"
+              style={{ width: m.small * 0.7, height: m.small * 0.7, background: payload.home_color }}
+            />
+            <span style={{ color: payload.home_color }}>{payload.home_short}</span>
+          </span>
+          <span className="text-white/45" style={{ fontSize: m.small * 0.85 }}>
+            Avg. touch positions
+          </span>
+          <span className="flex items-center gap-2">
+            <span style={{ color: payload.away_color }}>{payload.away_short}</span>
+            <span
+              className="inline-block rounded-full"
+              style={{ width: m.small * 0.7, height: m.small * 0.7, background: payload.away_color }}
+            />
+          </span>
+        </div>
+
+        {/* Pitch */}
+        <div className="relative flex-1" style={{ minHeight: 0 }}>
+          <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet" className="h-full w-full">
+            {/* Pitch background */}
+            <rect x="0" y="0" width={W} height={H} fill="var(--ov-pitch)" rx="0.5" />
+
+            {/* Markings */}
+            <line x1={W / 2} y1="0" x2={W / 2} y2={H} stroke="white" strokeOpacity="0.2" strokeWidth="0.15" />
+            <circle cx={W / 2} cy={H / 2} r={H * 0.12} fill="none" stroke="white" strokeOpacity="0.2" strokeWidth="0.15" />
+            <rect x="0" y={H * 0.2} width={W * 0.13} height={H * 0.6} fill="none" stroke="white" strokeOpacity="0.2" strokeWidth="0.15" />
+            <rect x={W - W * 0.13} y={H * 0.2} width={W * 0.13} height={H * 0.6} fill="none" stroke="white" strokeOpacity="0.2" strokeWidth="0.15" />
+
+            {/* Home team players */}
+            {payload.home_positions.map((p, i) => {
+              const pos = homePos(p);
+              const r = radius(p.n);
+              return (
+                <g key={`h-${i}`}>
+                  <circle
+                    cx={pos.x}
+                    cy={pos.y}
+                    r={r}
+                    fill={payload.home_color}
+                    fillOpacity={0.85}
+                    stroke="white"
+                    strokeWidth="0.15"
+                    strokeOpacity={0.6}
+                  >
+                    <title>{p.name} · {p.n} touches</title>
+                  </circle>
+                  {size !== "xs" && size !== "sm" && (
+                    <text
+                      x={pos.x}
+                      y={pos.y - r - 0.8}
+                      textAnchor="middle"
+                      fontSize="1.5"
+                      fontWeight="700"
+                      fill="white"
+                      fillOpacity={0.85}
+                    >
+                      {p.name.split(" ").slice(-1)[0]}
+                    </text>
+                  )}
+                </g>
+              );
+            })}
+
+            {/* Away team players */}
+            {payload.away_positions.map((p, i) => {
+              const pos = awayPos(p);
+              const r = radius(p.n);
+              return (
+                <g key={`a-${i}`}>
+                  <circle
+                    cx={pos.x}
+                    cy={pos.y}
+                    r={r}
+                    fill={payload.away_color}
+                    fillOpacity={0.85}
+                    stroke="white"
+                    strokeWidth="0.15"
+                    strokeOpacity={0.6}
+                  >
+                    <title>{p.name} · {p.n} touches</title>
+                  </circle>
+                  {size !== "xs" && size !== "sm" && (
+                    <text
+                      x={pos.x}
+                      y={pos.y - r - 0.8}
+                      textAnchor="middle"
+                      fontSize="1.5"
+                      fontWeight="700"
+                      fill="white"
+                      fillOpacity={0.85}
+                    >
+                      {p.name.split(" ").slice(-1)[0]}
+                    </text>
+                  )}
+                </g>
+              );
+            })}
+          </svg>
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-between text-white/35" style={{ fontSize: m.small * 0.8 }}>
+          <span>Dot size = involvement</span>
+          <span>n = touches sampled</span>
+        </div>
       </div>
     </Frame>
   );

@@ -5,10 +5,10 @@ import { TeamCrest } from "@/components/overlay/crest";
 import { LeagueBadge } from "@/components/overlay/league-badge";
 import { useOverlayEnv } from "@/components/overlay/env";
 import { useI18n } from "@/lib/i18n";
-import { localTeamName } from "@/lib/branding/clubs";
+import { localTeamName, luminance } from "@/lib/branding/clubs";
 import { accentOn, competitionLabel, themeFor, DEFAULT_THEME } from "@/lib/branding/leagues";
 
-/** True for ~0.7s after `value` changes (not on first render) — used to pop the score on a goal. */
+/** True for ~0.8s after `value` changes (not on first render) — pops the score on a goal. */
 function useJustChanged(value: number) {
   const prev = useRef(value);
   const [pop, setPop] = useState(false);
@@ -16,12 +16,19 @@ function useJustChanged(value: number) {
     if (prev.current === value) return;
     prev.current = value;
     setPop(true);
-    const id = setTimeout(() => setPop(false), 800);
+    const id = setTimeout(() => setPop(false), 900);
     return () => clearTimeout(id);
   }, [value]);
   return pop;
 }
 
+const inkOn = (bg: string) => (luminance(bg) > 150 ? "#0a101c" : "#ffffff");
+
+/**
+ * The score "bug": the always-on-screen graphic of a football broadcast.
+ *   [league] [HOME name ◢ crest] [ 2 – 1 ] [crest ◣ AWAY name] [clock]
+ * Team names sit on solid team-colour slants, like TV match graphics.
+ */
 export function ScoreboardScene({ snapshot }: { snapshot: MatchSnapshot }) {
   const { t, lang } = useI18n();
   const { tone } = useOverlayEnv();
@@ -33,49 +40,59 @@ export function ScoreboardScene({ snapshot }: { snapshot: MatchSnapshot }) {
   const isHT = snapshot.period === "HT" || snapshot.status === "ht";
   const isFT = snapshot.period === "FT" || snapshot.status === "ft";
   const upcoming = snapshot.status === "scheduled" && !isHT && !isFT;
-  const clock = isHT ? t("ov.ht") : isFT ? t("ov.ft") : upcoming ? t("ov.upcoming") : `${snapshot.minute}'`;
   const isLive = !isHT && !isFT && !upcoming;
+  const clock = isHT ? t("ov.ht") : isFT ? t("ov.ft") : upcoming ? t("ov.upcoming") : `${snapshot.minute}'`;
 
   return (
-    <div className="absolute inset-x-0 top-[2%] flex flex-col items-center">
-      <div
-        className="ov-drop-in flex items-stretch overflow-hidden rounded-[26px] border backdrop-blur-xl"
-        style={{ background: "var(--ov-surface)", borderColor: "var(--ov-border)", boxShadow: "var(--ov-shadow)" }}
-      >
-        {/* League cap */}
+    <div className="absolute inset-x-0 top-[1.5%] flex flex-col items-center">
+      <div className="ov-drop-in bc-drop relative flex items-stretch" style={{ filter: "drop-shadow(0 14px 24px rgb(0 0 0 / 0.5))", height: 116 }}>
+        {/* League tab */}
         {hasLeague && (
           <div
-            className="flex w-[190px] flex-col items-center justify-center gap-2 px-4 py-3 text-center"
-            style={{ background: `linear-gradient(160deg, ${theme.primary}, ${theme.secondary})` }}
+            className="bc-slant relative -mr-3 flex shrink-0 items-center"
+            style={{ width: 268, paddingLeft: 26, paddingRight: 30, background: `linear-gradient(100deg, ${theme.secondary}, ${theme.primary})`, borderBottom: `6px solid ${theme.accent}` }}
           >
-            <LeagueBadge theme={theme} size={62} />
-            <span className="max-w-full truncate text-[17px] font-bold leading-tight text-[#fff]">
-              {competitionLabel(snapshot.competition, lang) ?? theme.name}
+            <span className="flex items-center gap-3">
+              <LeagueBadge theme={theme} size={64} />
+              <span className="line-clamp-2 text-[21px] font-extrabold uppercase leading-[1.1] tracking-wide text-[#fff]">
+                {competitionLabel(snapshot.competition, lang) ?? theme.name}
+              </span>
             </span>
           </div>
         )}
 
-        <Side team={snapshot.home} align="right" lang={lang} />
+        <TeamBlock team={snapshot.home} lang={lang} side="home" />
 
-        {/* Score + clock */}
-        <div className="flex min-w-[250px] flex-col items-center justify-center gap-1.5 px-7 py-3" style={{ background: "rgb(128 128 128 / 0.1)" }}>
-          <div className="flex items-center gap-5 font-black tabular-nums text-white" style={{ fontSize: 84, lineHeight: 1 }}>
-            <Digit value={snapshot.score.home} />
-            <span className="text-white/35" style={{ fontSize: 52 }}>–</span>
-            <Digit value={snapshot.score.away} />
-          </div>
-          <div className="flex items-center gap-2.5 rounded-full px-4 py-1 text-[22px] font-extrabold uppercase tracking-wider" style={{ background: isLive ? "rgb(220 38 38 / 0.18)" : "rgb(128 128 128 / 0.18)", color: isLive ? "#ef4444" : accent }}>
-            {isLive && <span className="ov-pulse inline-block h-3 w-3 rounded-full bg-[#ef4444]" />}
-            {isLive && <span>{t("ov.live")}</span>}
-            <span className="tabular-nums text-white">{clock}</span>
-          </div>
+        {/* Score box */}
+        <div
+          className="relative z-10 flex min-w-[250px] items-center justify-center gap-5 px-7"
+          style={{ background: "var(--ov-surface-solid)", borderBottom: `6px solid ${accent}` }}
+        >
+          <Digit value={snapshot.score.home} />
+          <span className="font-black text-white/40" style={{ fontSize: 56, lineHeight: 1 }}>–</span>
+          <Digit value={snapshot.score.away} />
         </div>
 
-        <Side team={snapshot.away} align="left" lang={lang} />
+        <TeamBlock team={snapshot.away} lang={lang} side="away" />
+
+        {/* Clock tab */}
+        <div
+          className="bc-slant relative -ml-3 flex shrink-0 items-center justify-center"
+          style={{ width: 168, background: isLive ? "#d90f1e" : accent, borderBottom: "6px solid rgb(0 0 0 / 0.35)" }}
+        >
+          <span className="flex flex-col items-center leading-none" style={{ color: isLive ? "#fff" : inkOn(accent) }}>
+            {isLive && (
+              <span className="mb-1 flex items-center gap-2 text-[20px] font-extrabold uppercase tracking-[0.18em]">
+                <span className="ov-pulse inline-block h-3 w-3 rounded-full bg-white" />{t("ov.live")}
+              </span>
+            )}
+            <span className="text-[50px] font-black tabular-nums">{clock}</span>
+          </span>
+        </div>
       </div>
 
       {stale && (
-        <div className="ov-card-in mt-3 rounded-full bg-amber-500 px-5 py-1.5 text-[20px] font-extrabold text-black shadow-lg">
+        <div className="ov-card-in mt-3 bg-amber-400 px-6 py-1.5 text-[22px] font-extrabold uppercase tracking-wider text-black" style={{ clipPath: "polygon(14px 0,100% 0,calc(100% - 14px) 100%,0 100%)" }}>
           {t("ov.delayed")}
         </div>
       )}
@@ -85,26 +102,38 @@ export function ScoreboardScene({ snapshot }: { snapshot: MatchSnapshot }) {
 
 function Digit({ value }: { value: number }) {
   const pop = useJustChanged(value);
-  return <span className={`inline-block min-w-[1ch] text-center ${pop ? "ov-score-pop" : ""}`}>{value}</span>;
+  return (
+    <span className={`inline-block min-w-[1ch] text-center font-black tabular-nums text-white ${pop ? "ov-score-pop" : ""}`} style={{ fontSize: 88, lineHeight: 1 }}>
+      {value}
+    </span>
+  );
 }
 
-function Side({ team, align, lang }: { team: MatchSnapshot["home"]; align: "left" | "right"; lang: "en" | "am" }) {
+function TeamBlock({ team, lang, side }: { team: MatchSnapshot["home"]; lang: "en" | "am"; side: "home" | "away" }) {
   const name = localTeamName(team.name, lang);
-  const crest = <TeamCrest name={team.name} color={team.color} crestUrl={team.crestUrl} size={92} />;
+  const ink = inkOn(team.color);
+  const crest = (
+    <div className="relative z-20 flex shrink-0 items-center justify-center rounded-full" style={{ width: 96, height: 96, margin: "0 -6px", background: "rgb(255 255 255 / 0.96)", boxShadow: "0 6px 14px rgb(0 0 0 / 0.4)" }}>
+      <TeamCrest name={team.name} color={team.color} crestUrl={team.crestUrl} size={78} flat />
+    </div>
+  );
+  const label = (
+    <div
+      className="bc-slant relative flex min-w-0 flex-1 items-center"
+      style={{ width: 360, background: `linear-gradient(${side === "home" ? "100deg" : "260deg"}, ${team.color}, color-mix(in oklab, ${team.color} 72%, black))`, borderBottom: "6px solid rgb(0 0 0 / 0.3)" }}
+    >
+      <span
+        className={`block w-full truncate px-9 text-[44px] font-extrabold uppercase leading-none ${side === "home" ? "text-right" : "text-left"}`}
+        style={{ color: ink, letterSpacing: "0.02em" }}
+        title={name}
+      >
+        {name}
+      </span>
+    </div>
+  );
   return (
-    <div className="relative flex w-[400px] items-center gap-5 px-7 py-3">
-      {align === "right" ? (
-        <>
-          <span className="min-w-0 flex-1 truncate text-right text-[38px] font-extrabold leading-tight text-white" title={name}>{name}</span>
-          {crest}
-        </>
-      ) : (
-        <>
-          {crest}
-          <span className="min-w-0 flex-1 truncate text-left text-[38px] font-extrabold leading-tight text-white" title={name}>{name}</span>
-        </>
-      )}
-      <span className="absolute inset-x-0 bottom-0 h-[6px]" style={{ background: team.color }} />
+    <div className="relative flex items-stretch">
+      {side === "home" ? <>{label}{crest}</> : <>{crest}{label}</>}
     </div>
   );
 }

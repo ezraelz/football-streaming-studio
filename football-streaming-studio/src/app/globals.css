@@ -17,33 +17,47 @@
 
 :root {
   color-scheme: dark;
-  --app-bg: #09090b;
-  --app-fg: #f4f4f5;
+  --app-bg: #07100d;
+  --app-fg: #eef4f0;
+
+  /* "Floodlit night" neutrals: slate tinted with pitch green */
+  --color-zinc-50: #f7faf8;
+  --color-zinc-100: #eef4f0;
+  --color-zinc-200: #dbe6df;
+  --color-zinc-300: #c0cfc6;
+  --color-zinc-400: #9bb0a5;
+  --color-zinc-500: #6f877b;
+  --color-zinc-600: #44594e;
+  --color-zinc-700: #2b4036;
+  --color-zinc-800: #1b2c25;
+  --color-zinc-900: #0d1a15;
+  --color-zinc-950: #07100d;
 }
 
 @theme inline {
   --font-sans: var(--font-inter), var(--font-ethiopic), "Nyala", "Abyssinica SIL", ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-display-latin), var(--font-ethiopic), "Nyala", "Abyssinica SIL", "Arial Narrow", ui-sans-serif, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 /* ───────────── Light theme (control app) ───────────── */
 html[data-theme="light"] {
   color-scheme: light;
-  --app-bg: #f4f5f7;
-  --app-fg: #18181b;
+  --app-bg: #f1f5f0;
+  --app-fg: #0f1d17;
 
-  /* neutrals — surfaces & text, inverted */
-  --color-zinc-50: #09090b;
-  --color-zinc-100: #18181b;
-  --color-zinc-200: #27272a;
-  --color-zinc-300: #3f3f46;
-  --color-zinc-400: #52525b;
-  --color-zinc-500: #71717a;
-  --color-zinc-600: #a1a1aa;
-  --color-zinc-700: #d4d4d8;
-  --color-zinc-800: #e4e4e7;
+  /* "Daylight chalk" neutrals — surfaces & text, inverted */
+  --color-zinc-50: #07100d;
+  --color-zinc-100: #0f1d17;
+  --color-zinc-200: #1d2e26;
+  --color-zinc-300: #34493f;
+  --color-zinc-400: #4b6056;
+  --color-zinc-500: #6b8277;
+  --color-zinc-600: #9db1a5;
+  --color-zinc-700: #cbd9d0;
+  --color-zinc-800: #dfe8e1;
   --color-zinc-900: #ffffff;
-  --color-zinc-950: #f4f5f7;
+  --color-zinc-950: #f1f5f0;
 
   /* status colours: light tints for fills/borders, dark shades for text */
   --color-emerald-950: #ecfdf5;
@@ -119,6 +133,35 @@ html[lang="am"] body {
   }
 }
 
+/* ───────────── Football decoration (control app) ───────────── */
+
+.font-display { font-family: var(--font-display); }
+
+/* Mown-grass stripes: subtle vertical bands, used on headers and the sidebar crest area. */
+.pitch-stripes {
+  background-image: repeating-linear-gradient(90deg, rgb(255 255 255 / 0.035) 0 44px, transparent 44px 88px);
+}
+html[data-theme="light"] .pitch-stripes {
+  background-image: repeating-linear-gradient(90deg, rgb(16 120 60 / 0.06) 0 44px, transparent 44px 88px);
+}
+/* Faint centre-circle + halfway line, for page banners. */
+.pitch-lines {
+  background-image:
+    radial-gradient(circle at 92% 50%, transparent 0 46px, rgb(255 255 255 / 0.07) 46px 48px, transparent 48px),
+    linear-gradient(90deg, transparent calc(92% - 1px), rgb(255 255 255 / 0.07) calc(92% - 1px) 92%, transparent 92%);
+}
+html[data-theme="light"] .pitch-lines {
+  background-image:
+    radial-gradient(circle at 92% 50%, transparent 0 46px, rgb(16 120 60 / 0.14) 46px 48px, transparent 48px),
+    linear-gradient(90deg, transparent calc(92% - 1px), rgb(16 120 60 / 0.14) calc(92% - 1px) 92%, transparent 92%);
+}
+
+/* Resize handles */
+.resize-handle { touch-action: none; }
+body.is-resizing { cursor: col-resize; user-select: none; }
+body.is-resizing-y { cursor: row-resize; user-select: none; }
+body.is-resizing iframe, body.is-resizing-y iframe { pointer-events: none; }
+
 /* ───────────── Broadcast overlay ───────────── */
 
 /* The overlay's own palette. Dark is the default. */
@@ -129,7 +172,9 @@ html[lang="am"] body {
   --ov-border: rgb(255 255 255 / 0.1);
   --ov-shadow: 0 30px 80px -20px rgb(0 0 0 / 0.85);
   --ov-pitch: #0d2818;
-  font-family: var(--font-sans);
+  /* Condensed broadcast face; Amharic falls back to Noto Sans Ethiopic. */
+  font-family: var(--font-display);
+  font-weight: 600;
 }
 
 /* Light cards: re-point white/black so every text-white/NN, bg-white/NN, border-white/NN utility flips. */
@@ -161,15 +206,30 @@ html[lang="am"] body {
   --ov-surface: rgb(255 255 255 / 0.98);
 }
 
-/* Broadcast overlay: graphics cards slide up and fade in, staggered via --ov-delay. */
+/* Broadcast graphics wipe in from the left edge, staggered via --ov-delay. */
 @keyframes ov-card-in {
-  from { opacity: 0; transform: translateY(28px) scale(0.97); }
+  from { opacity: 0; transform: translateX(-56px); }
   to   { opacity: 1; transform: none; }
 }
 .ov-card-in {
-  animation: ov-card-in 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation: ov-card-in 0.55s cubic-bezier(0.2, 0.8, 0.2, 1) both;
   animation-delay: var(--ov-delay, 0ms);
 }
+
+/* Shared broadcast shapes */
+.bc-chamfer {
+  --cut: 26px;
+  clip-path: polygon(0 0, calc(100% - var(--cut)) 0, 100% var(--cut), 100% 100%, var(--cut) 100%, 0 calc(100% - var(--cut)));
+}
+.bc-slant { transform: skewX(-14deg); }
+.bc-slant > * { transform: skewX(14deg); }
+.bc-stripes {
+  background-image: repeating-linear-gradient(90deg, rgb(255 255 255 / 0.028) 0 60px, transparent 60px 120px);
+}
+.ov-tone-light .bc-stripes {
+  background-image: repeating-linear-gradient(90deg, rgb(16 120 60 / 0.05) 0 60px, transparent 60px 120px);
+}
+.ov-lite .bc-drop { filter: none !important; }
 
 /* Scoreboard drops in from the top. */
 @keyframes ov-drop-in {

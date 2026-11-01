@@ -62,14 +62,9 @@ export function SceneList() {
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-zinc-100">{t("scene.heading")}</h2>
-        <span className="text-xs text-zinc-400">
-          {t("scene.pressKeys", { a: 1, b: SCENES.length })}
-        </span>
-      </div>
+      <span className="text-xs text-zinc-400">{t("scene.pressKeys", { a: 1, b: SCENES.length })}</span>
 
-      <div role="group" aria-label={t("scene.heading")} className="grid grid-cols-3 gap-2 sm:grid-cols-6">
+      <div role="group" aria-label={t("scene.heading")} className="grid grid-cols-3 gap-2">
         {SCENES.map(({ key, label, icon: Icon }, i) => {
           const active = activeScene === key;
           return (
@@ -78,7 +73,7 @@ export function SceneList() {
               onClick={() => switchScene(key)}
               aria-pressed={active}
               className={cn(
-                "relative flex h-20 flex-col items-center justify-center gap-1.5 rounded-xl border px-2 text-sm font-medium transition-colors",
+                "relative flex h-[72px] flex-col items-center justify-center gap-1 rounded-lg border px-2 text-sm font-semibold transition-colors",
                 focusRing,
                 active
                   ? "border-red-500/70 bg-red-500/10 text-zinc-50"

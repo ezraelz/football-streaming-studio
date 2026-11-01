@@ -123,20 +123,17 @@ function OverlayStage() {
   }, [hydrated, params.token]);
 
   // Fetch incidents once match_id is known, then poll every 30s
+  // Rely on the WS match.update for new events.
   useEffect(() => {
-    if (!data?.match_id) return;
+    if (!data?.match_id || incidents.length > 0) return;
     let cancelled = false;
 
-    const fetchIncidents = () => {
-      api.incidents(data.match_id)
-        .then((r) => { if (!cancelled) setIncidents(r.incidents); })
-        .catch(() => { /* keep previous */ });
-    };
+    api.incidents(data.match_id)
+      .then((r) => { if (!cancelled) setIncidents(r.incidents); })
+      .catch(() => { /* ignore, wait for WS */ });
 
-    fetchIncidents();
-    const id = setInterval(fetchIncidents, 30_000);
-    return () => { cancelled = true; clearInterval(id); };
-  }, [data?.match_id]);
+    return () => { cancelled = true; };
+  }, [data?.match_id, incidents.length]);
 
   // Safety net: OBS reloads sources and websockets drop. Re-sync scene + cards every 5s
   // (only if the backend includes them in the overlay state).
@@ -305,6 +302,7 @@ function OverlayStage() {
       {sceneKey === "timeline" && (
         <TimelineScene
           incidents={incidents}
+          competition={snapshot.competition}
           home={{
             id: live.home.id,
             name: live.home.name,

@@ -341,6 +341,18 @@ export interface Incident {
   rescinded: boolean;
 }
 
+export interface PlayerStatsPickerItem {
+  player_id: string;
+  name: string;
+  team: "home" | "away";
+  team_short: string;
+  team_color: string;
+  minutes: number;
+  rating: number | string | null;
+  goals: number;
+  assists: number;
+}
+
 // --- typed surface ---
 
 export const api = {
@@ -356,7 +368,15 @@ export const api = {
     return data;
   },
 
-  fixtures: () => request<Fixture[]>("/fixtures"),
+  /** `from`/`to` are ISO dates; a backend that doesn't support the window just returns everything (the page filters again). */
+  fixtures: (opts: { from?: string; to?: string; leagueId?: string } = {}) => {
+    const q = new URLSearchParams();
+    if (opts.from) q.set("from", opts.from);
+    if (opts.to) q.set("to", opts.to);
+    if (opts.leagueId) q.set("league_id", opts.leagueId);
+    const qs = q.toString();
+    return request<Fixture[]>(`/fixtures${qs ? `?${qs}` : ""}`);
+  },
   match: (id: string) => request<MatchSnapshot>(`/matches/${id}`),
   events: (id: string) => request<MatchEvent[]>(`/matches/${id}/events`),
   lineups: (id: string) => request<unknown[]>(`/matches/${id}/lineups`),
@@ -478,9 +498,10 @@ export const api = {
     request<{ hidden: boolean }>(`/show-sessions/${sessionId}/editorial-cards/hide`, {
       method: "POST",
     }),
-  seedEditorialCard: (sessionId: string, cardType: string) =>
+  seedEditorialCard: (sessionId: string, cardType: string, body?: Record<string, unknown>) =>
     request<EditorialCard>(`/show-sessions/${sessionId}/editorial-cards/seed/${cardType}`, {
       method: "POST",
+      body: JSON.stringify(body ?? {}),
     }),
 
   h2h: (matchId: string) => request<H2HMeeting[]>(`/matches/${matchId}/h2h`),
@@ -504,5 +525,11 @@ export const api = {
     request<{ match_id: string; incidents: Incident[]; count: number }>(
       `/matches/${matchId}/incidents`
     ),
+
+  matchPlayerStatsList: (sessionId: string) =>
+    request<{ players: PlayerStatsPickerItem[] }>(
+      `/show-sessions/${sessionId}/player-stats-list`
+    ),
+
 };
 

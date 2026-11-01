@@ -8,6 +8,7 @@ import { TopBar } from "@/components/layout/top-bar";
 import { AuthGuard } from "@/components/layout/auth-guard";
 import { useT } from "@/lib/i18n";
 import { LanguageSwitch, ThemeToggle } from "@/components/ui/prefs";
+import { ResizeHandle, useResizableSize } from "@/components/ui/resizable";
 
 export default function ControlLayout({ children }: { children: ReactNode }) {
   return (
@@ -20,6 +21,7 @@ export default function ControlLayout({ children }: { children: ReactNode }) {
 function LayoutShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const t = useT();
+  const sidebar = useResizableSize("sidebar", 248, 200, 420);
   const [menuState, setMenuState] = useState({ open: false, pathname: "" });
   const menuOpen = menuState.open && menuState.pathname === pathname;
 
@@ -67,9 +69,19 @@ function LayoutShell({ children }: { children: ReactNode }) {
         }`}
       >
         <Suspense fallback={<SidebarFallback />}>
-          <Sidebar />
+          <Sidebar width={sidebar.size} />
         </Suspense>
       </div>
+      {/* Drag to resize the sidebar (desktop). Double-click to reset. */}
+      <ResizeHandle
+        className="-ml-1 hidden lg:block"
+        value={sidebar.size}
+        min={sidebar.min}
+        max={sidebar.max}
+        onChange={sidebar.setSize}
+        onReset={sidebar.reset}
+        label={t("resize.sidebar")}
+      />
 
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         {/* Mobile header with menu button */}

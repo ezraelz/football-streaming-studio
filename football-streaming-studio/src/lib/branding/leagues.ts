@@ -11,7 +11,7 @@
  * name wins, so specific names (Ethiopian Premier League, CAF Champions League) come
  * before generic ones (Premier League, Champions League).
  */
-export type Motif = "ball" | "star" | "cup" | "crown" | "bolt" | "laurel" | "stars";
+export type Motif = "ball" | "star" | "cup" | "crown" | "bolt" | "laurel" | "stars" | "lion" | "starball" | "shield";
 
 export interface LeagueTheme {
   id: string;        // file name under public/leagues/
@@ -39,16 +39,16 @@ export const LEAGUE_THEMES: LeagueTheme[] = [
   { id: "ethiopian-premier-league", name: "Ethiopian Premier League", am: "የኢትዮጵያ ፕሪሚየር ሊግ", short: "EPL", primary: "#065f2c", secondary: "#0a3d1c", accent: "#fcdd09", ink: "#ffffff", motif: "laurel", flag: ETH_FLAG, match: ["ethiopian premier", "ethiopia premier", "ethiopian higher", "ethiopian cup", "ethiopia cup"] },
   { id: "caf-champions-league", name: "CAF Champions League", am: "የካፍ ቻምፒዮንስ ሊግ", short: "CAF", primary: "#0b3b2e", secondary: "#061f19", accent: "#f5c542", ink: "#ffffff", motif: "cup", match: ["caf champions", "african champions"] },
   { id: "caf-confederation-cup", name: "CAF Confederation Cup", am: "የካፍ ኮንፌዴሬሽን ዋንጫ", short: "CCC", primary: "#7a1f2b", secondary: "#2a0a10", accent: "#ffb454", ink: "#ffffff", motif: "cup", match: ["confederation cup", "caf confederation"] },
-  { id: "afcon", name: "Africa Cup of Nations", am: "የአፍሪካ ዋንጫ", short: "AFCON", primary: "#14532d", secondary: "#7f1d1d", accent: "#facc15", ink: "#ffffff", motif: "stars", match: ["africa cup of nations", "afcon", "african cup of nations"] },
+  { id: "afcon", name: "Africa Cup of Nations", am: "የአፍሪካ ዋንጫ", short: "AFCON", primary: "#14532d", secondary: "#7f1d1d", accent: "#facc15", ink: "#ffffff", motif: "starball", match: ["africa cup of nations", "afcon", "african cup of nations"] },
   { id: "cecafa", name: "CECAFA Cup", am: "ሴካፋ ዋንጫ", short: "CEC", primary: "#0b4a6f", secondary: "#08283c", accent: "#5eead4", ink: "#ffffff", motif: "star", match: ["cecafa"] },
 
   /* ── Europe's top leagues ── */
-  { id: "premier-league", name: "Premier League", am: "የእንግሊዝ ፕሪሚየር ሊግ", short: "PL", primary: "#38003c", secondary: "#e90052", accent: "#00ff85", ink: "#ffffff", motif: "crown", match: ["premier league", "english premier"] },
+  { id: "premier-league", name: "Premier League", am: "የእንግሊዝ ፕሪሚየር ሊግ", short: "PL", primary: "#38003c", secondary: "#e90052", accent: "#00ff85", ink: "#ffffff", motif: "lion", match: ["premier league", "english premier"] },
   { id: "la-liga", name: "La Liga", am: "ላ ሊጋ", short: "LL", primary: "#b3121a", secondary: "#ff6a13", accent: "#ffc72c", ink: "#ffffff", motif: "ball", match: ["la liga", "laliga", "primera division", "primera división"] },
-  { id: "serie-a", name: "Serie A", am: "ሴሪያ ኤ", short: "SA", primary: "#0a3d8f", secondary: "#0a1f44", accent: "#27c6ff", ink: "#ffffff", motif: "star", match: ["serie a"] },
+  { id: "serie-a", name: "Serie A", am: "ሴሪያ ኤ", short: "SA", primary: "#0a3d8f", secondary: "#0a1f44", accent: "#27c6ff", ink: "#ffffff", motif: "shield", match: ["serie a"] },
   { id: "bundesliga", name: "Bundesliga", am: "ቡንደስሊጋ", short: "BL", primary: "#c8102e", secondary: "#5a0a16", accent: "#ffffff", ink: "#ffffff", motif: "ball", match: ["bundesliga"] },
   { id: "ligue-1", name: "Ligue 1", am: "ሊግ 1", short: "L1", primary: "#0b1f5b", secondary: "#13307f", accent: "#d6e600", ink: "#ffffff", motif: "bolt", match: ["ligue 1"] },
-  { id: "champions-league", name: "Champions League", am: "ቻምፒዮንስ ሊግ", short: "UCL", primary: "#0a1a4f", secondary: "#143a9a", accent: "#7db4ff", ink: "#ffffff", motif: "stars", match: ["champions league"] },
+  { id: "champions-league", name: "Champions League", am: "ቻምፒዮንስ ሊግ", short: "UCL", primary: "#0a1a4f", secondary: "#143a9a", accent: "#7db4ff", ink: "#ffffff", motif: "starball", match: ["champions league"] },
   { id: "europa-league", name: "Europa League", am: "ዩሮፓ ሊግ", short: "UEL", primary: "#a14a00", secondary: "#1a1208", accent: "#ff9a2e", ink: "#ffffff", motif: "star", match: ["europa league"] },
   { id: "conference-league", name: "Conference League", am: "ኮንፈረንስ ሊግ", short: "UECL", primary: "#0a5c36", secondary: "#08281a", accent: "#4be08a", ink: "#ffffff", motif: "laurel", match: ["conference league"] },
   { id: "eredivisie", name: "Eredivisie", am: "ኤሬዲቪዚ", short: "ED", primary: "#c2410c", secondary: "#431407", accent: "#fdba74", ink: "#ffffff", motif: "ball", match: ["eredivisie"] },
