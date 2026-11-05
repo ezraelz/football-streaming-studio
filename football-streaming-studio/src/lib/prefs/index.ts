@@ -4,6 +4,9 @@ import { createPref } from "./store";
 export type Lang = "en" | "am";
 export type ThemeMode = "system" | "light" | "dark";
 export type OverlayTone = "dark" | "light";
+export type { FormatId } from "@/lib/overlay/stage";
+export type Accent = "pitch" | "royal" | "gold" | "crimson";
+export const ACCENTS: Accent[] = ["pitch", "royal", "gold", "crimson"];
 
 export const langPref = createPref<Lang>({
   key: "studio.lang",
@@ -17,6 +20,13 @@ export const themePref = createPref<ThemeMode>({
   key: "studio.theme",
   fallback: "system",
   parse: (r) => (r === "system" || r === "light" || r === "dark" ? r : undefined),
+});
+
+/** Primary colour of the studio (and of the overlay URL Settings generates). */
+export const accentPref = createPref<Accent>({
+  key: "studio.accent",
+  fallback: "pitch",
+  parse: (r) => ((ACCENTS as string[]).includes(r) ? (r as Accent) : undefined),
 });
 
 /** Show dates in the Ethiopian (Ge'ez) calendar. */
@@ -43,6 +53,12 @@ export const overlayLitePref = createPref<boolean>({
   key: "studio.overlayLite",
   fallback: false,
   parse: (r) => (r === "true" ? true : r === "false" ? false : undefined),
+});
+/** Output format of the overlay: 16:9 (YouTube), 9:16 (TikTok/Shorts/Reels) or 1:1. */
+export const formatPref = createPref<"landscape" | "portrait" | "square">({
+  key: "studio.format",
+  fallback: "landscape",
+  parse: (r) => (r === "landscape" || r === "portrait" || r === "square" ? r : undefined),
 });
 /** "follow" = same language as the studio; otherwise force one for the broadcast. */
 export const overlayLangPref = createPref<"follow" | Lang>({

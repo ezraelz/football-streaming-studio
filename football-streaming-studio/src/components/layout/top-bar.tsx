@@ -26,7 +26,10 @@ const FRESHNESS = {
 export function TopBar() {
   const t = useT();
   const fmt = useFormat();
-  const { session, snapshot, emergencyStop, setSession } = useShowStore();
+  const session = useShowStore((s) => s.session);
+  const snapshot = useShowStore((s) => s.snapshot);
+  const emergencyStop = useShowStore((s) => s.emergencyStop);
+  const setSession = useShowStore((s) => s.setSession);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [mounted, setMounted] = useState(false);

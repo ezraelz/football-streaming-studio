@@ -137,6 +137,10 @@ export interface OverlayState {
   editorial_cards?: EditorialCard[];
   state: "configured" | "armed" | "live" | "paused" | "degraded" | "stopped";
   match_id: string;
+  /** ISO kick-off time (optional; lets the score bug show the time before the match starts). */
+  kickoff?: string;
+  /** The match's own status from the provider: scheduled | live | ft. NOT the show session state. */
+  match_status?: string;
   home: TeamRef;
   away: TeamRef;
   snapshot: {

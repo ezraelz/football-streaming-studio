@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { CalendarDays, Clapperboard, LogOut, Radio, Settings, Tv2 } from "lucide-react";
+import { CalendarDays, Clapperboard, Film, LogOut, Radio, Settings, Tv2 } from "lucide-react";
 import { cn } from "@/lib/utility/utils";
 import { clearTokens } from "@/lib/api/client";
 import { useShowStore } from "@/lib/stores/show-store";
@@ -11,7 +11,7 @@ import { LanguageSwitch, ThemeSwitch } from "@/components/ui/prefs";
 
 // Grouped the way a producer works: pick the match, then set up the show.
 const NAV_GROUPS = [
-  { label: "nav.group.broadcast", items: [{ href: "/", key: "nav.matches", icon: CalendarDays, exact: true }] },
+  { label: "nav.group.broadcast", items: [{ href: "/", key: "nav.matches", icon: CalendarDays, exact: true }, { href: "/maker", key: "nav.maker", icon: Film, exact: false }] },
   {
     label: "nav.group.setup",
     items: [
@@ -25,7 +25,8 @@ export function Sidebar({ width = 248 }: { width?: number }) {
   const pathname = usePathname();
   const router = useRouter();
   const t = useT();
-  const { session, snapshot } = useShowStore();
+  const session = useShowStore((s) => s.session);
+  const matchLabel = useShowStore((s) => (s.snapshot ? `${s.snapshot.home.shortName} v ${s.snapshot.away.shortName}` : null));
 
   const hasShow = session && session.state !== "stopped";
   const inStudio = pathname.startsWith("/studio");
@@ -69,7 +70,7 @@ export function Sidebar({ width = 248 }: { width?: number }) {
               <span className="ml-auto text-zinc-400">{t(`state.${session.state}` as const)}</span>
             </div>
             <div className="mt-1 truncate text-sm font-semibold text-zinc-50">
-              {snapshot ? `${snapshot.home.shortName} v ${snapshot.away.shortName}` : t("nav.openStudio")}
+              {matchLabel ?? t("nav.openStudio")}
             </div>
           </Link>
         </div>

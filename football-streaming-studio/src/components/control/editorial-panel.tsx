@@ -2,9 +2,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { api, type EditorialCard } from "@/lib/api/client";
-import { useSocket } from "@/lib/hooks/use-socket";
 import { useMatchAvailability } from "@/lib/hooks/use-match-availability";
-import { EyeOff, Plus, Radio, Trash2 } from "lucide-react";
+import { Crosshair, EyeOff, History, Maximize2, Plus, Radio, Trash2, UserRound, type LucideIcon } from "lucide-react";
+import { useRundown } from "@/lib/stores/rundown-store";
 import { cn } from "@/lib/utility/utils";
 import { Button } from "@/components/ui/button";
 import { ConfirmButton } from "@/components/ui/confirm-button";
@@ -91,11 +91,12 @@ const PHASES: { key: "pre" | "live" | "post" | "league"; label: MsgKey; cards: C
   { key: "league", label: "gfx.phase.league", cards: ["standings", "top_scorers", "top_assists", "best_xi"] },
 ];
 
-export function EditorialPanel() {
+export function EditorialPanel({ addOnly = false }: { addOnly?: boolean } = {}) {
   const t = useT();
   const fmt = useFormat();
   const params = useParams<{ sessionId: string }>();
-  const [cards, setCards] = useState<EditorialCard[]>([]);
+
+  const cards = useRundown((st) => st.cards); // shared with the Rundown switcher
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
@@ -106,20 +107,10 @@ export function EditorialPanel() {
   const [pickerOpen, setPickerOpen] = useState(false);
 
   const refresh = useCallback(async () => {
-    try {
-      setCards(await api.listEditorialCards(params.sessionId));
-    } catch {
-      setError(t("gfx.err.load"));
-    } finally {
-      setLoading(false);
-    }
-  }, [params.sessionId, t]);
-
-  useEffect(() => { void refresh(); }, [refresh]);
-
-  useSocket<EditorialCard>(`/ws/v1/show-sessions/${params.sessionId}`, (msg) => {
-    if (msg.type === "editorial.update") void refresh();
-  });
+    await useRundown.getState().refresh();
+    setLoading(false);
+  }, []);
+  useEffect(() => { setLoading(false); }, []);
 
   const isAvailable = (cardType: CardType): boolean => {
     const required = REQUIRES[cardType] ?? [];
@@ -408,8 +399,8 @@ export function EditorialPanel() {
 
       {error && <Alert tone="error" onDismiss={() => setError(null)}>{error}</Alert>}
 
-      {/* ── Existing cards list ──────────────────────────────────────── */}
-      {loading ? (
+      {/* ── Existing cards list (the Rundown shows this; hidden in add-only mode) ───── */}
+      {addOnly ? null : loading ? (
         <p className="text-sm text-zinc-400">{t("gfx.loading")}</p>
       ) : cards.length === 0 ? (
         <EmptyState title={t("gfx.emptyTitle")} description={t("gfx.emptyBody")} />

@@ -1,15 +1,12 @@
 "use client";
 import { Suspense, useEffect, useState } from "react";
+import dynamic from "next/dynamic";
 import { useParams } from "next/navigation";
 import { useShowStore } from "@/lib/stores/show-store";
 import { useSocket } from "@/lib/hooks/use-socket";
 import { usePendingSuggestions } from "@/lib/hooks/use-pending-suggestions";
 import { api } from "@/lib/api/client";
-import { PreviewPane } from "@/components/control/preview-pane";
 import { MatchStrip } from "@/components/control/match-strip";
-import { LiveDataPanel } from "@/components/control/live-data-panel";
-import { SuggestionFeed } from "@/components/control/suggestion-feed";
-import { BroadcastDesk } from "@/components/control/broadcast-desk";
 import { ResizeHandle, useResizableSize } from "@/components/ui/resizable";
 import { Skeleton } from "@/components/ui/feedback";
 import { cn } from "@/lib/utility/utils";
@@ -17,6 +14,13 @@ import { focusRing } from "@/components/ui/button";
 import type { ShowSession } from "@/lib/types/types";
 import { useT } from "@/lib/i18n";
 import { SpeechPlayer } from "@/components/control/speech-player";
+
+// Heavy panels load on demand, so the studio shell appears fast.
+const panelFallback = () => <Skeleton className="h-40 w-full" />;
+const PreviewPane = dynamic(() => import("@/components/control/preview-pane").then((m) => m.PreviewPane), { ssr: false, loading: () => <Skeleton className="h-72 w-full" /> });
+const LiveDataPanel = dynamic(() => import("@/components/control/live-data-panel").then((m) => m.LiveDataPanel), { loading: panelFallback });
+const SuggestionFeed = dynamic(() => import("@/components/control/suggestion-feed").then((m) => m.SuggestionFeed), { loading: panelFallback });
+const BroadcastDesk = dynamic(() => import("@/components/control/broadcast-desk").then((m) => m.BroadcastDesk), { loading: panelFallback });
 import { SystemAlertBanner } from "@/components/control/system-alert-banner";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -26,7 +30,10 @@ type Tab = "suggestions" | "broadcast" | "match";
 export function StudioContent() {
   const params = useParams<{ sessionId: string }>();
   const t = useT();
-  const { session, snapshot, loadMock, setSession } = useShowStore();
+  const session = useShowStore((s) => s.session);
+  const hasSnapshot = useShowStore((s) => s.snapshot !== null);
+  const loadMock = useShowStore((s) => s.loadMock);
+  const setSession = useShowStore((s) => s.setSession);
   const [tab, setTab] = useState<Tab>("broadcast");
   const aside = useResizableSize("studio-aside", 440, 340, 780);
   const suggestions = usePendingSuggestions(params.sessionId);
@@ -47,11 +54,11 @@ export function StudioContent() {
   // Fetch the snapshot from the API if we have a real session but no snapshot
   useEffect(() => {
     if (!session || !UUID_RE.test(session.id)) return;
-    if (snapshot) return;
+    if (hasSnapshot) return;
     api.match(session.match_id)
       .then((snap) => useShowStore.setState({ snapshot: snap }))
       .catch(() => { /* poller may not have synced the match yet */ });
-  }, [session, snapshot]);
+  }, [session, hasSnapshot]);
 
   // WebSocket: session updates and scene commands
   const isRealSession = UUID_RE.test(params.sessionId);
@@ -64,7 +71,7 @@ export function StudioContent() {
     }
   });
 
-  if (!snapshot) return <StudioSkeleton message={t("studio.loading")} />;
+  if (!hasSnapshot) return <StudioSkeleton message={t("studio.loading")} />;
 
   const pending = suggestions.items.length;
 

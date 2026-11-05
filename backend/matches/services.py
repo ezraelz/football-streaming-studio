@@ -128,9 +128,29 @@ def _infer_goals_from_score_delta(match: Match, previous: MatchSnapshot | None, 
 @transaction.atomic
 def refresh_fixtures(provider: FootballProvider | None = None,
                      date_from: str | None = None,
-                     date_to: str | None = None) -> list[Match]:
+                     date_to: str | None = None,
+                     league_ids: list[int] | None = None) -> list[Match]:
     p = provider or get_provider()
-    fixtures = list(p.get_fixtures(date_from=date_from, date_to=date_to))
+
+    # `league_ids` may not exist on every provider — only forward it when set
+    # and when the provider actually accepts the kwarg.
+    kwargs = {"date_from": date_from, "date_to": date_to}
+    if league_ids is not None:
+        kwargs["league_ids"] = league_ids
+
+    try:
+        fixtures = list(p.get_fixtures(**kwargs))
+    except TypeError:
+        # Provider predates the league_ids kwarg — retry without it, then
+        # filter client-side so the caller still gets scoped results.
+        fixtures = list(p.get_fixtures(date_from=date_from, date_to=date_to))
+        if league_ids is not None:
+            wanted = {str(i) for i in league_ids}
+            fixtures = [
+                f for f in fixtures
+                if str(getattr(f, "league_id", "")) in wanted
+            ]
+
     return [_upsert_match(f, p.name) for f in fixtures]
 
 @transaction.atomic

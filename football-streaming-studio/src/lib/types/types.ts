@@ -20,6 +20,8 @@ export interface MatchSnapshot {
   period: string;
   minute: number;
   status: "scheduled" | "live" | "ht" | "ft";
+  /** ISO kick-off time, so the overlay can show it before the match starts. */
+  kickoff?: string;
   stats: Record<string, { home: number; away: number }>;
   providerUpdatedAt: string;
   receivedAt: string;

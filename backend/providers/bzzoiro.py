@@ -36,6 +36,21 @@ _POSITION_MAP = {
     "F": "FW", "FW": "FW", "ATT": "FW", "ST": "FW",
 }
 
+LEAGUE_NAMES: dict[int, str] = {
+    1: "Premier League",
+    3: "La Liga",
+    4: "Serie A",
+    5: "Bundesliga",
+    6: "Ligue 1",
+    7: "Champions League",
+    8: "Europa League",
+    39: "FA Cup",
+    # ...add more as you poll more leagues...
+}
+
+# Top 5 European leagues — the default poll scope.
+TOP_5_LEAGUE_IDS: tuple[int, ...] = (1, 3, 4, 5, 6)
+
 
 def _slug(name: str) -> str:
     name = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode()
@@ -184,7 +199,8 @@ class BzzoiroProvider(FootballProvider):
     # --- Interface methods ---
 
     def get_fixtures(self, date_from: Optional[str] = None,
-                     date_to: Optional[str] = None) -> Iterable[Fixture]:
+                    date_to: Optional[str] = None,
+                    league_ids: Optional[Iterable[int]] = None) -> Iterable[Fixture]:
         today = datetime.now(timezone.utc).date()
         start = _to_date(date_from) or today
         end = _to_date(date_to) or (start + timedelta(days=7))
@@ -194,20 +210,30 @@ class BzzoiroProvider(FootballProvider):
         capped = start + timedelta(days=self.MAX_WINDOW_DAYS)
         if end > capped:
             logger.warning("get_fixtures window %s..%s exceeds MAX_WINDOW_DAYS; "
-                           "clamping to %s", start, end, capped)
+                        "clamping to %s", start, end, capped)
             end = capped
 
-        # Provider dates are UTC but the audience isn't (UTC+3): fetch with a margin
-        # so matches that are "today" locally don't vanish on the UTC boundary.
         q_from = (start - timedelta(days=1)).isoformat()
         q_to = (end + timedelta(days=1)).isoformat()
+
+        # Normalise the league filter once. `None` = no filtering (all leagues).
+        league_filter: Optional[set[str]] = (
+            {str(i) for i in league_ids} if league_ids else None
+        )
 
         fixtures: dict[str, Fixture] = {}
         errors: list[str] = []
 
         # 1) Scheduled / finished events in the window (paginated).
         try:
-            for ev in self._paged("/events/", {"date_from": q_from, "date_to": q_to, "limit": 200}):
+            params = {"date_from": q_from, "date_to": q_to, "limit": 200}
+            if league_filter:
+                # BSD v2 accepts league_id as a repeated/comma-joined query param.
+                # If your account rejects the comma form, switch to a loop over ids.
+                params["league_id"] = ",".join(sorted(league_filter))
+            for ev in self._paged("/events/", params):
+                if league_filter and str(ev.get("league_id")) not in league_filter:
+                    continue  # belt-and-braces in case the API ignores the param
                 fx = self._build_fixture(ev)
                 if fx is not None:
                     fixtures[str(ev["id"])] = fx
@@ -215,11 +241,13 @@ class BzzoiroProvider(FootballProvider):
             errors.append(str(e))
             logger.warning("Fixtures window %s..%s failed: %s", q_from, q_to, e)
 
-        # 2) Live overrides — only relevant if the window includes today.
+        # 2) Live overrides — only if the window includes today.
         if start <= today <= end:
             try:
                 live = self._get("/events/live/")
                 for ev in (live.get("events") or []):
+                    if league_filter and str(ev.get("league_id")) not in league_filter:
+                        continue
                     fx = self._build_fixture(ev, force_status="live")
                     if fx is not None:
                         fixtures[str(ev["id"])] = fx
@@ -227,11 +255,9 @@ class BzzoiroProvider(FootballProvider):
                 errors.append(str(e))
                 logger.warning("Live fixtures failed: %s", e)
 
-        # Don't hide a total failure behind an empty list.
         if not fixtures and errors:
             raise ProviderError("; ".join(errors))
 
-        # Trim the safety margin back to the user's local date range.
         lo = start - timedelta(days=1)
         hi = end + timedelta(days=1)
 

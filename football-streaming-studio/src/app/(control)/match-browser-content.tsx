@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { CalendarX2, ChevronRight, Play, Search, Star } from "lucide-react";
+import { CalendarX2, ChevronLeft, ChevronRight, Film, Play, Search, Star } from "lucide-react";
 import { api, type Fixture } from "@/lib/api/client";
 import type { ShowProfile, ShowSession } from "@/lib/types/types";
 import { useShowStore } from "@/lib/stores/show-store";
@@ -13,7 +13,6 @@ import { Badge } from "@/components/ui/badge";
 import { Alert, EmptyState, Skeleton } from "@/components/ui/feedback";
 import { PageHeader } from "@/components/ui/page-header";
 import { inputClass } from "@/components/ui/form";
-import { ResizeHandle, useResizableSize } from "@/components/ui/resizable";
 import { useI18n, useT, type TFn } from "@/lib/i18n";
 import { useFormat } from "@/lib/i18n/use-format";
 import { TeamCrest } from "@/components/overlay/crest";
@@ -26,64 +25,25 @@ type CommentaryMode = ReturnType<typeof useShowStore.getState>["commentaryMode"]
 const DEFAULT_MODE = "approval" as unknown as CommentaryMode;
 const STATUS_ORDER: Record<string, number> = { live: 0, scheduled: 1, ft: 2 };
 
-/** What the date strip is showing. `day:YYYY-MM-DD` is a single calendar day. */
-type Range = "live" | "week" | "month" | "next-month" | "all" | `day:${string}`;
-type GroupBy = "league" | "day";
+type Scope = "day" | "week" | "month";
 
 const PIN_KEY = "studio.pinnedLeagues";
 /** First visit: pin the Ethiopian league so local fixtures are always on top. */
 const DEFAULT_PINS = ["ethiopian-premier-league"];
 
-// --- Simplified Date Helpers ---
-const isoDay = (d: Date) => {
-  // Use local time to build the YYYY-MM-DD string
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-};
-
-const addDays = (d: Date, n: number) => { 
-  const x = new Date(d); 
-  x.setDate(x.getDate() + n); 
-  return x; 
-};
+/* ---------- date helpers (all in the viewer's LOCAL calendar, never UTC) ---------- */
 
 const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+const addDays = (d: Date, n: number) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+const addMonths = (d: Date, n: number) => new Date(d.getFullYear(), d.getMonth() + n, 1);
+const isoDay = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const fromIso = (v: string) => { const [y, m, d] = v.split("-").map(Number); return new Date(y, (m || 1) - 1, d || 1); };
 
-// --- Simplified Range Logic ---
-function inRange(f: Fixture, range: Range, now: Date) {
-  if (range === "live") return f.status === "live";
-  if (range === "all") return true;
-
-  // Convert the match kickoff (UTC) to a local YYYY-MM-DD string
-  const kickoffDate = new Date(f.kickoff);
-  const kickoffDayStr = isoDay(kickoffDate);
-
-  if (range.startsWith("day:")) {
-    const targetDay = range.slice(4);
-    return kickoffDayStr === targetDay;
-  }
-
-  if (range === "week") {
-    const from = isoDay(startOfDay(now));
-    const to = isoDay(addDays(startOfDay(now), 7));
-    return kickoffDayStr >= from && kickoffDayStr <= to;
-  }
-
-  if (range === "month") {
-    const from = isoDay(startOfDay(now));
-    const to = isoDay(new Date(now.getFullYear(), now.getMonth() + 1, 0)); // Last day of this month
-    return kickoffDayStr >= from && kickoffDayStr <= to;
-  }
-
-  if (range === "next-month") {
-    const from = isoDay(new Date(now.getFullYear(), now.getMonth() + 1, 1));
-    const to = isoDay(new Date(now.getFullYear(), now.getMonth() + 2, 0));
-    return kickoffDayStr >= from && kickoffDayStr <= to;
-  }
-
-  return true;
+function boundsFor(anchor: Date, scope: Scope): { from: Date; to: Date } {
+  const d = startOfDay(anchor);
+  if (scope === "day") return { from: d, to: addDays(d, 1) };
+  if (scope === "week") return { from: d, to: addDays(d, 7) };
+  return { from: new Date(d.getFullYear(), d.getMonth(), 1), to: addMonths(d, 1) };
 }
 
 const leagueKey = (f: Fixture) => {
@@ -92,14 +52,13 @@ const leagueKey = (f: Fixture) => {
 };
 
 function usePinned() {
-  const [pins, setPins] = useState<string[]>(() => {
-    if (typeof window === "undefined") return DEFAULT_PINS;
+  const [pins, setPins] = useState<string[]>(DEFAULT_PINS);
+  useEffect(() => {
     try {
       const raw = window.localStorage.getItem(PIN_KEY);
-      if (raw) return JSON.parse(raw);
+      if (raw) setPins(JSON.parse(raw));
     } catch { /* ignore */ }
-    return DEFAULT_PINS;
-  });
+  }, []);
   const toggle = useCallback((key: string) => {
     setPins((prev) => {
       const next = prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key];
@@ -125,11 +84,15 @@ export function MatchBrowserContent() {
   const fmt = useFormat();
   const router = useRouter();
   const preferredProfile = useRef(useSearchParams().get("profile"));
-  const rail = useResizableSize("matches-rail", 280, 200, 460);
   const { pins, toggle: togglePin } = usePinned();
 
-  const [now] = useState(() => new Date());
+  const [today] = useState(() => startOfDay(new Date()));
+  const [anchor, setAnchor] = useState<Date>(today);
+  const [scope, setScope] = useState<Scope>("day");
+  const [liveOnly, setLiveOnly] = useState(false);
+  const [league, setLeague] = useState<string>("all");
   const [search, setSearch] = useState("");
+
   const [fixtures, setFixtures] = useState<Fixture[]>([]);
   const [profiles, setProfiles] = useState<ShowProfile[]>([]);
   const [profileId, setProfileId] = useState<string>("");
@@ -138,31 +101,36 @@ export function MatchBrowserContent() {
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState<string | null>(null);
   const [resuming, setResuming] = useState(false);
-  const [range, setRange] = useState<Range>("month");
-  const [league, setLeague] = useState<string>("all");
-  const [groupBy, setGroupBy] = useState<GroupBy>("league");
 
+  const bounds = useMemo(() => (liveOnly ? boundsFor(today, "day") : boundsFor(anchor, scope)), [anchor, scope, liveOnly, today]);
+  const boundsKey = `${isoDay(bounds.from)}|${isoDay(bounds.to)}`;
+
+  // Profiles and the running session load once.
   useEffect(() => {
     let cancelled = false;
-    // Ask backend for a wide window to be safe.
-    // We ask for yesterday up to 2 months from now.
-    const from = isoDay(addDays(startOfDay(new Date()), -1));
-    const to = isoDay(new Date(new Date().getFullYear(), new Date().getMonth() + 2, 1));
-    
-    Promise.all([api.fixtures({ from, to }), api.listProfiles(), api.listSessions("live,paused,degraded")])
-      .then(([f, p, sessions]) => {
+    Promise.all([api.listProfiles(), api.listSessions("live,paused,degraded")])
+      .then(([p, sessions]) => {
         if (cancelled) return;
-        setFixtures(f);
         setProfiles(p);
         setProfileId(p.find((x) => x.id === preferredProfile.current)?.id ?? p[0]?.id ?? "");
         setActiveSession(sessions[0] ?? null);
       })
-      .catch((e: unknown) => {
-        if (!cancelled) setError(e instanceof Error ? e.message : t("matches.err.load"));
-      })
+      .catch((e: unknown) => { if (!cancelled) setError(e instanceof Error ? e.message : t("matches.err.load")); });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Fixtures reload whenever you move to a different date range (one day either side as a margin).
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    api.fixtures({ from: isoDay(addDays(bounds.from, -1)), to: isoDay(addDays(bounds.to, 1)) })
+      .then((f) => { if (!cancelled) { setFixtures(f); setError(null); } })
+      .catch((e: unknown) => { if (!cancelled) setError(e instanceof Error ? e.message : t("matches.err.load")); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [boundsKey]);
 
   const q = search.trim().toLowerCase();
   const matchesSearch = useCallback(
@@ -170,14 +138,20 @@ export function MatchBrowserContent() {
     [q],
   );
 
-  /** Fixtures in the chosen date range + search (before the league filter, so the rail shows true counts). */
-  const inWindow = useMemo(() => fixtures.filter((f) => inRange(f, range, now) && matchesSearch(f)), [fixtures, range, now, matchesSearch]);
+  /** Everything in the chosen range (before the league filter, so the pills show true counts). */
+  const inWindow = useMemo(() => {
+    return fixtures.filter((f) => {
+      if (!matchesSearch(f)) return false;
+      if (liveOnly) return f.status === "live";
+      const k = new Date(f.kickoff);
+      if (!(k >= bounds.from && k < bounds.to)) return false;
+      // Longer ranges are for planning: hide results that are already over (but keep today's).
+      if (scope !== "day" && f.status === "ft" && startOfDay(k) < today) return false;
+      return true;
+    });
+  }, [fixtures, matchesSearch, liveOnly, bounds, scope, today]);
 
-  /** Date-chip counts (respect search + league, so a chip never promises matches the list will hide). */
-  const chipCount = useCallback(
-    (r: Range) => fixtures.filter((f) => inRange(f, r, now) && matchesSearch(f) && (league === "all" || leagueKey(f) === league)).length,
-    [fixtures, now, matchesSearch, league],
-  );
+  const liveCount = useMemo(() => fixtures.filter((f) => f.status === "live").length, [fixtures]);
 
   const leagues = useMemo<LeagueGroup[]>(() => {
     const map = new Map<string, LeagueGroup>();
@@ -200,42 +174,22 @@ export function MatchBrowserContent() {
     return arr;
   }, [inWindow, pins, t]);
 
-  const shown = useMemo(() => (league === "all" ? inWindow : inWindow.filter((f) => leagueKey(f) === league)), [inWindow, league]);
-  const shownLeagues = useMemo(() => (league === "all" ? leagues : leagues.filter((g) => g.key === league)), [leagues, league]);
+  // If the chosen league has nothing in this range, fall back to "all" instead of an empty page.
+  const activeLeague = league !== "all" && leagues.some((g) => g.key === league) ? league : "all";
+  const shownLeagues = useMemo(() => (activeLeague === "all" ? leagues : leagues.filter((g) => g.key === activeLeague)), [leagues, activeLeague]);
+  const shownCount = shownLeagues.reduce((n, g) => n + g.fixtures.length, 0);
 
-  /** By-day grouping: day → league → fixtures. */
-  const byDay = useMemo(() => {
-    const days = new Map<string, { key: string; date: Date; leagues: LeagueGroup[] }>();
-    for (const f of shown.slice().sort((a, b) => new Date(a.kickoff).getTime() - new Date(b.kickoff).getTime())) {
-      const d = new Date(f.kickoff);
-      const dk = d.toDateString();
-      const day = days.get(dk) ?? { key: dk, date: d, leagues: [] };
-      const lk = leagueKey(f);
-      let g = day.leagues.find((x) => x.key === lk);
-      if (!g) { g = { key: lk, name: f.competition || t("matches.otherFixtures"), fixtures: [], live: 0 }; day.leagues.push(g); }
-      g.fixtures.push(f);
-      days.set(dk, day);
-    }
-    return Array.from(days.values());
-  }, [shown, t]);
+  // ── navigation ──────────────────────────────────────────────────────────────────────────
+  const step = (dir: -1 | 1) => setAnchor((a) => (scope === "day" ? addDays(a, dir) : scope === "week" ? addDays(a, 7 * dir) : addMonths(a, dir)));
+  const title =
+    scope === "day" ? fmt.day(anchor)
+    : scope === "week" ? `${fmt.day(anchor, false)} – ${fmt.day(addDays(anchor, 6), false)}`
+    : fmt.month(anchor);
+  const atToday = startOfDay(anchor).getTime() === today.getTime();
 
-  const liveNow = useMemo(() => fixtures.filter((f) => f.status === "live" && matchesSearch(f)), [fixtures, matchesSearch]);
-
-  /* date strip: Live · Today · Tomorrow · next weekdays · week · month · next month · all */
-  const dayChips = useMemo(() => {
-    const today = startOfDay(now);
-    return Array.from({ length: 7 }, (_, i) => addDays(today, i));
-  }, [now]);
-
+  // ── session actions ───────────────────────────────────────────────────────────────────────
   const resetStore = useCallback((session: ShowSession) => {
-    useShowStore.setState({
-      session,
-      overlayToken: session.overlay_token,
-      snapshot: null,
-      events: [],
-      suggestions: [],
-      transcript: [],
-    });
+    useShowStore.setState({ session, overlayToken: session.overlay_token, snapshot: null, events: [], suggestions: [], transcript: [] });
   }, []);
 
   const resume = async () => {
@@ -255,17 +209,13 @@ export function MatchBrowserContent() {
 
   const startShow = async (fixtureId: string) => {
     const profile = profiles.find((p) => p.id === profileId) ?? profiles[0];
-    if (!profile) {
-      setError(t("matches.err.noProfile"));
-      return;
-    }
+    if (!profile) { setError(t("matches.err.noProfile")); return; }
     setStarting(fixtureId);
     setError(null);
     try {
       let session = await api.createSession(profile.id, fixtureId);
       session = await api.transition(session.id, "armed");
       session = await api.transition(session.id, "live");
-
       const cfg = (profile.commentary_config ?? {}) as unknown as { mode?: string; voice?: string; language?: string };
       resetStore(session);
       useShowStore.setState({
@@ -282,48 +232,21 @@ export function MatchBrowserContent() {
 
   const activeFixture = activeSession ? fixtures.find((f) => f.id === activeSession.match_id) : undefined;
   const activeProfile = profiles.find((p) => p.id === profileId);
-
-  const clearFilters = () => { setRange("all"); setLeague("all"); setSearch(""); };
-
-  const renderRows = (list: Fixture[], showDay: boolean) => (
-    <ul className="divide-y divide-zinc-800 overflow-hidden rounded-b-xl border-x border-b border-zinc-800 bg-zinc-900/40">
-      {list.map((f) => (
-        <FixtureRow
-          key={f.id}
-          fixture={f}
-          t={t}
-          time={fmt.time(f.kickoff)}
-          day={showDay ? fmt.day(f.kickoff, false) : undefined}
-          starting={starting === f.id}
-          disabled={starting !== null || profiles.length === 0}
-          onStart={() => startShow(f.id)}
-        />
-      ))}
-    </ul>
-  );
-
-  const monthLabel = fmt.month(now);
+  const clearFilters = () => { setLiveOnly(false); setLeague("all"); setSearch(""); setScope("month"); setAnchor(today); };
 
   return (
-    <div className="mx-auto flex w-full max-w-[1500px] flex-col gap-5">
+    <div className="mx-auto flex w-full max-w-[1200px] flex-col gap-4">
       <PageHeader
         title={t("matches.title")}
         description={t("matches.description")}
         icon="matches"
-        actions={
-          !loading && (
-            <span className="rounded-full border border-zinc-700 bg-zinc-900/60 px-3 py-1 text-xs font-semibold text-zinc-300">
-              {t("matches.summary", { n: shown.length, m: shownLeagues.length })}
-            </span>
-          )
-        }
+        actions={!loading && <span className="rounded-full border border-zinc-700 bg-zinc-900/60 px-3 py-1 text-xs font-semibold text-zinc-300">{t("matches.summary", { n: shownCount, m: shownLeagues.length })}</span>}
       />
 
       {error && <Alert tone="error" onDismiss={() => setError(null)}>{error}</Alert>}
 
-      {/* Resume — the most likely thing you want when a show is already running */}
       {activeSession && (
-        <div className="flex flex-col gap-3 rounded-2xl border border-emerald-700/50 bg-emerald-950/30 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+        <div className="flex flex-col gap-3 rounded-2xl border border-emerald-700/50 bg-emerald-950/30 p-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
             <p className="flex flex-wrap items-center gap-2 text-sm font-medium text-emerald-100">
               <span className="relative flex h-2 w-2" aria-hidden>
@@ -344,253 +267,140 @@ export function MatchBrowserContent() {
         </div>
       )}
 
-      {/* Date strip + search */}
-      <div className="flex flex-col gap-3 rounded-xl border border-zinc-800 bg-zinc-900/50 p-3">
-        <div className="flex flex-wrap items-center gap-3">
-          <div role="tablist" aria-label={t("matches.dates")} className="flex min-w-0 flex-1 items-stretch gap-1.5 overflow-x-auto pb-1">
-            <Chip active={range === "live"} onClick={() => setRange("live")} tone="live" count={chipCount("live")}>
-              <span className="mr-1 inline-block h-2 w-2 animate-pulse rounded-full bg-red-500 motion-reduce:animate-none" aria-hidden />
-              {t("common.live")}
-            </Chip>
-            {dayChips.map((d, i) => {
-              const key = `day:${isoDay(d)}` as Range;
-              const parts = fmt.chip(d);
+      {/* ── Filters: one date bar, one row of leagues ─────────────────────────────────── */}
+      <div className="sticky top-0 z-20 -mx-1 flex flex-col gap-3 rounded-2xl border border-zinc-800 bg-zinc-950/95 p-3 backdrop-blur">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* date navigator */}
+          <div className={cn("flex items-center gap-1 rounded-xl border border-zinc-800 bg-zinc-900/60 p-1", liveOnly && "pointer-events-none opacity-40")}>
+            <button onClick={() => step(-1)} aria-label={t("matches.prev")} className={cn("rounded-lg p-2 text-zinc-300 hover:bg-zinc-800", focusRing)}><ChevronLeft className="h-5 w-5" aria-hidden /></button>
+            <label className="relative flex min-w-[11rem] cursor-pointer flex-col items-center px-2 text-center" title={t("matches.pickDate")}>
+              <span className="font-display text-lg font-bold leading-tight text-zinc-50">{title}</span>
+              <input
+                type="date"
+                value={isoDay(anchor)}
+                onChange={(e) => e.target.value && setAnchor(fromIso(e.target.value))}
+                aria-label={t("matches.pickDate")}
+                className="absolute inset-0 cursor-pointer opacity-0"
+              />
+            </label>
+            <button onClick={() => step(1)} aria-label={t("matches.next")} className={cn("rounded-lg p-2 text-zinc-300 hover:bg-zinc-800", focusRing)}><ChevronRight className="h-5 w-5" aria-hidden /></button>
+          </div>
+
+          <Button size="md" onClick={() => { setAnchor(today); setLiveOnly(false); }} disabled={atToday && !liveOnly}>{t("time.today")}</Button>
+
+          <div role="radiogroup" aria-label={t("matches.scope")} className={cn("inline-flex rounded-lg bg-zinc-900/60 p-0.5", liveOnly && "pointer-events-none opacity-40")}>
+            {(["day", "week", "month"] as const).map((sc) => (
+              <button key={sc} role="radio" aria-checked={scope === sc} onClick={() => setScope(sc)}
+                className={cn("rounded-md px-3 py-1.5 text-sm font-semibold transition-colors", focusRing, scope === sc ? "bg-emerald-600 text-white" : "text-zinc-400 hover:text-zinc-100")}>
+                {t(`matches.scope.${sc}` as const)}
+              </button>
+            ))}
+          </div>
+
+          <button
+            onClick={() => setLiveOnly((v) => !v)}
+            aria-pressed={liveOnly}
+            className={cn("ml-auto flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-semibold transition-colors", focusRing,
+              liveOnly ? "border-red-500 bg-red-600 text-white" : "border-zinc-700 text-zinc-300 hover:border-red-500/60")}
+          >
+            <span className={cn("h-2 w-2 rounded-full", liveOnly ? "bg-white" : "animate-pulse bg-red-500 motion-reduce:animate-none")} aria-hidden />
+            {t("common.live")}
+            <span className={cn("rounded px-1.5 text-xs tabular-nums", liveOnly ? "bg-black/25" : "bg-zinc-800 text-zinc-300")}>{liveCount}</span>
+          </button>
+        </div>
+
+        {/* leagues */}
+        <div className="flex items-center gap-2">
+          <div role="group" aria-label={t("matches.leagues")} className="flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto pb-1">
+            <Pill active={activeLeague === "all"} onClick={() => setLeague("all")}>{t("matches.allLeagues")}<Count n={inWindow.length} /></Pill>
+            {leagues.map((g) => {
+              const th = themeFor(g.name);
               return (
-                <Chip key={key} active={range === key} onClick={() => setRange(key)} count={chipCount(key)} stacked>
-                  <span className="text-[11px] font-medium uppercase opacity-80">{i === 0 ? t("time.today") : i === 1 ? t("time.tomorrow") : parts.weekday}</span>
-                  <span className="text-base font-bold leading-none">{parts.day}</span>
-                  <span className="text-[10px] opacity-70">{parts.month}</span>
-                </Chip>
+                <Pill key={g.key} active={activeLeague === g.key} onClick={() => setLeague(activeLeague === g.key ? "all" : g.key)}>
+                  <LeagueBadge theme={th} size={20} />
+                  <span className="max-w-[9rem] truncate">{competitionLabel(g.name, lang)}</span>
+                  {g.live > 0 && <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-red-500 motion-reduce:animate-none" aria-label={t("common.live")} />}
+                  <Count n={g.fixtures.length} />
+                </Pill>
               );
             })}
-            <span className="mx-1 w-px shrink-0 bg-zinc-700" aria-hidden />
-            <Chip active={range === "week"} onClick={() => setRange("week")} count={chipCount("week")}>{t("matches.range.week")}</Chip>
-            <Chip active={range === "month"} onClick={() => setRange("month")} count={chipCount("month")}>{t("matches.range.month")}</Chip>
-            <Chip active={range === "next-month"} onClick={() => setRange("next-month")} count={chipCount("next-month")}>{t("matches.range.nextMonth")}</Chip>
-            <Chip active={range === "all"} onClick={() => setRange("all")} count={chipCount("all")}>{t("matches.range.all")}</Chip>
           </div>
-
-          <div className="relative w-full sm:w-60">
+          <div className="relative hidden w-52 shrink-0 sm:block">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-500" aria-hidden />
-            <input
-              type="search"
-              aria-label={t("matches.search")}
-              placeholder={t("matches.search")}
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className={cn(inputClass, "pl-9")}
-            />
+            <input type="search" aria-label={t("matches.search")} placeholder={t("matches.search")} value={search} onChange={(e) => setSearch(e.target.value)} className={cn(inputClass, "py-1.5 pl-9")} />
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
-          <div className="flex items-center gap-2">
-            <span className="text-zinc-400">{t("matches.groupBy")}</span>
-            <div role="radiogroup" aria-label={t("matches.groupBy")} className="inline-flex rounded-lg bg-zinc-950/60 p-0.5">
-              {(["league", "day"] as const).map((g) => (
-                <button
-                  key={g}
-                  role="radio"
-                  aria-checked={groupBy === g}
-                  onClick={() => setGroupBy(g)}
-                  className={cn("rounded-md px-3 py-1 text-xs font-semibold transition-colors", focusRing, groupBy === g ? "bg-emerald-600 text-white" : "text-zinc-400 hover:text-zinc-100")}
-                >
-                  {t(g === "league" ? "matches.groupLeague" : "matches.groupDay")}
-                </button>
-              ))}
-            </div>
+        {/* which profile the show will use — always visible, never a surprise */}
+        {!loading && (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+            <span className="text-zinc-400">{t("matches.startingWith")}</span>
+            {profiles.length === 0 ? (
+              <Link href="/shows" className="font-medium text-emerald-400 hover:text-emerald-300">{t("matches.createProfile")}</Link>
+            ) : profiles.length === 1 ? (
+              <span className="font-medium text-zinc-100">{activeProfile?.name}</span>
+            ) : (
+              <select aria-label={t("matches.profileAria")} value={profileId} onChange={(e) => setProfileId(e.target.value)} className={cn(inputClass, "w-auto py-1")}>
+                {profiles.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            )}
+            {profiles.length > 0 && <Link href="/shows" className="text-xs text-zinc-400 hover:text-zinc-100">{t("matches.manageProfiles")}</Link>}
           </div>
-          <span className="text-xs text-zinc-500">{range === "month" || range === "next-month" ? monthLabel : ""}</span>
-
-          {/* Which profile will the show use? Always visible, never a surprise. */}
-          {!loading && (
-            <div className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1.5">
-              <span className="text-zinc-400">{t("matches.startingWith")}</span>
-              {profiles.length === 0 ? (
-                <Link href="/shows" className="font-medium text-emerald-400 hover:text-emerald-300">{t("matches.createProfile")}</Link>
-              ) : profiles.length === 1 ? (
-                <span className="font-medium text-zinc-100">{activeProfile?.name}</span>
-              ) : (
-                <select aria-label={t("matches.profileAria")} value={profileId} onChange={(e) => setProfileId(e.target.value)} className={cn(inputClass, "w-auto py-1")}>
-                  {profiles.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                </select>
-              )}
-              {profiles.length > 0 && <Link href="/shows" className="text-xs text-zinc-400 hover:text-zinc-100">{t("matches.manageProfiles")}</Link>}
-            </div>
-          )}
-        </div>
+        )}
       </div>
 
-      <div className="flex min-h-0 flex-col gap-4 lg:flex-row lg:gap-0">
-        {/* League rail (resizable) */}
-        <aside className="shrink-0 lg:sticky lg:top-0 lg:self-start" style={{ width: undefined }}>
-          <div className="hidden lg:block" style={{ width: rail.size }}>
-            <LeagueRail
-              t={t}
-              lang={lang}
-              leagues={leagues}
-              total={inWindow.length}
-              selected={league}
-              onSelect={setLeague}
-              pins={pins}
-              onPin={togglePin}
-            />
-          </div>
-          {/* Mobile: a simple select */}
-          <div className="lg:hidden">
-            <select aria-label={t("matches.leagues")} value={league} onChange={(e) => setLeague(e.target.value)} className={inputClass}>
-              <option value="all">{t("matches.allLeagues")} ({inWindow.length})</option>
-              {leagues.map((g) => <option key={g.key} value={g.key}>{competitionLabel(g.name, lang)} ({g.fixtures.length})</option>)}
-            </select>
-          </div>
-        </aside>
-
-        <ResizeHandle
-          className="hidden lg:block"
-          value={rail.size}
-          min={rail.min}
-          max={rail.max}
-          onChange={rail.setSize}
-          onReset={rail.reset}
-          label={t("resize.rail")}
-        />
-
-        {/* Fixtures */}
-        <main className="min-w-0 flex-1 space-y-6 lg:pl-3" aria-busy={loading}>
-          {loading ? (
-            <LoadingList label={t("matches.loading")} />
-          ) : (
-            <>
-              {range !== "live" && liveNow.length > 0 && (
-                <section aria-labelledby="live-now">
-                  <h2 id="live-now" className="mb-2 flex items-center gap-2 font-display text-lg font-bold uppercase tracking-wide text-red-400">
-                    <span className="inline-block h-2.5 w-2.5 animate-pulse rounded-full bg-red-500 motion-reduce:animate-none" aria-hidden />
-                    {t("matches.liveNow")} · {liveNow.length}
-                  </h2>
-                  <ul className="divide-y divide-zinc-800 overflow-hidden rounded-xl border border-red-500/40 bg-red-500/5">
-                    {liveNow.map((f) => (
-                      <FixtureRow key={f.id} fixture={f} t={t} time={fmt.time(f.kickoff)} starting={starting === f.id} disabled={starting !== null || profiles.length === 0} onStart={() => startShow(f.id)} />
-                    ))}
-                  </ul>
-                </section>
-              )}
-
-              {shown.length === 0 ? (
-                <EmptyState
-                  icon={<CalendarX2 className="h-7 w-7" />}
-                  title={
-                    search ? t("matches.empty.search", { q: search })
-                    : range === "live" ? t("matches.empty.live")
-                    : range.startsWith("day:") ? t("matches.empty.today")
-                    : t("matches.empty.none")
-                  }
-                  description={fixtures.length > 0 ? t("matches.empty.tryOther") : t("matches.empty.sync")}
-                  action={fixtures.length > 0 ? <Button onClick={clearFilters}>{t("matches.showAll")}</Button> : undefined}
-                />
-              ) : groupBy === "league" ? (
-                shownLeagues.map((g) => (
-                  <section key={g.key} aria-labelledby={`lg-${g.key}`}>
-                    <LeagueHeader
-                      id={`lg-${g.key}`}
-                      name={g.name}
-                      lang={lang}
-                      count={g.fixtures.length}
-                      live={g.live}
-                      pinned={pins.includes(g.key)}
-                      onPin={() => togglePin(g.key)}
-                      t={t}
-                    />
-                    {renderRows(g.fixtures, !range.startsWith("day:"))}
-                  </section>
-                ))
-              ) : (
-                byDay.map((day) => (
-                  <section key={day.key} aria-labelledby={`day-${day.key}`} className="space-y-4">
-                    <h2 id={`day-${day.key}`} className="border-b border-zinc-800 pb-1 font-display text-xl font-bold uppercase tracking-wide text-zinc-50">
-                      {fmt.day(day.date)}
-                    </h2>
-                    {day.leagues.map((g) => (
-                      <div key={g.key}>
-                        <LeagueHeader id={`d-${day.key}-${g.key}`} name={g.name} lang={lang} count={g.fixtures.length} live={0} pinned={pins.includes(g.key)} onPin={() => togglePin(g.key)} t={t} />
-                        {renderRows(g.fixtures, false)}
-                      </div>
-                    ))}
-                  </section>
-                ))
-              )}
-            </>
-          )}
-        </main>
-      </div>
+      {/* ── Fixtures ─────────────────────────────────────────────────────────────────── */}
+      <main className="space-y-5" aria-busy={loading}>
+        {loading ? (
+          <LoadingList label={t("matches.loading")} />
+        ) : shownCount === 0 ? (
+          <EmptyState
+            icon={<CalendarX2 className="h-7 w-7" />}
+            title={search ? t("matches.empty.search", { q: search }) : liveOnly ? t("matches.empty.live") : scope === "day" ? t("matches.empty.day") : t("matches.empty.none")}
+            description={t("matches.empty.tryOther")}
+            action={<Button onClick={clearFilters}>{t("matches.showMonth")}</Button>}
+          />
+        ) : (
+          shownLeagues.map((g) => (
+            <section key={g.key} aria-labelledby={`lg-${g.key}`}>
+              <LeagueHeader id={`lg-${g.key}`} name={g.name} lang={lang} count={g.fixtures.length} live={g.live} pinned={pins.includes(g.key)} onPin={() => togglePin(g.key)} t={t} />
+              <ul className="divide-y divide-zinc-800 overflow-hidden rounded-b-xl border-x border-b border-zinc-800 bg-zinc-900/40">
+                {g.fixtures.map((f) => (
+                  <FixtureRow
+                    key={f.id}
+                    fixture={f}
+                    t={t}
+                    time={fmt.time(f.kickoff)}
+                    day={!liveOnly && scope !== "day" ? fmt.day(f.kickoff, false) : undefined}
+                    starting={starting === f.id}
+                    disabled={starting !== null || profiles.length === 0}
+                    onStart={() => startShow(f.id)}
+                  />
+                ))}
+              </ul>
+            </section>
+          ))
+        )}
+      </main>
     </div>
   );
 }
 
-/* ---------- league rail & headers ---------- */
-
-function LeagueRail({
-  t, lang, leagues, total, selected, onSelect, pins, onPin,
-}: {
-  t: TFn; lang: "en" | "am"; leagues: LeagueGroup[]; total: number;
-  selected: string; onSelect: (k: string) => void; pins: string[]; onPin: (k: string) => void;
-}) {
-  const pinned = leagues.filter((g) => pins.includes(g.key));
-  const rest = leagues.filter((g) => !pins.includes(g.key));
-  const row = (g: LeagueGroup) => {
-    const th = themeFor(g.name);
-    const active = selected === g.key;
-    return (
-      <li key={g.key} className="group relative">
-        <button
-          onClick={() => onSelect(active ? "all" : g.key)}
-          aria-pressed={active}
-          className={cn(
-            "flex w-full items-center gap-2.5 rounded-lg py-2 pl-2 pr-9 text-left text-sm transition-colors",
-            focusRing,
-            active ? "bg-emerald-600/20 text-zinc-50 ring-1 ring-emerald-600/50" : "text-zinc-300 hover:bg-zinc-800/60",
-          )}
-        >
-          <span className="flex h-7 w-7 shrink-0 items-center justify-center"><LeagueBadge theme={th} size={26} /></span>
-          <span className="min-w-0 flex-1 truncate font-medium">{competitionLabel(g.name, lang)}</span>
-          {g.live > 0 && <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-red-500 motion-reduce:animate-none" aria-label={t("common.live")} />}
-          <span className="shrink-0 text-xs tabular-nums text-zinc-500">{g.fixtures.length}</span>
-        </button>
-        <button
-          onClick={() => onPin(g.key)}
-          aria-label={pins.includes(g.key) ? t("matches.unpin") : t("matches.pin")}
-          title={pins.includes(g.key) ? t("matches.unpin") : t("matches.pin")}
-          className={cn("absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-1 transition-opacity", focusRing, pins.includes(g.key) ? "text-amber-400" : "text-zinc-600 opacity-0 hover:text-amber-300 focus:opacity-100 group-hover:opacity-100")}
-        >
-          <Star className="h-3.5 w-3.5" fill={pins.includes(g.key) ? "currentColor" : "none"} aria-hidden />
-        </button>
-      </li>
-    );
-  };
+function Pill({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
-    <nav aria-label={t("matches.leagues")} className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-2">
-      <h2 className="px-2 pb-2 pt-1 font-display text-sm font-bold uppercase tracking-[0.16em] text-zinc-400">{t("matches.leagues")}</h2>
-      <button
-        onClick={() => onSelect("all")}
-        aria-pressed={selected === "all"}
-        className={cn("mb-1 flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm font-semibold transition-colors", focusRing, selected === "all" ? "bg-emerald-600/20 text-zinc-50 ring-1 ring-emerald-600/50" : "text-zinc-300 hover:bg-zinc-800/60")}
-      >
-        {t("matches.allLeagues")}<span className="text-xs tabular-nums text-zinc-500">{total}</span>
-      </button>
-      {pinned.length > 0 && (
-        <>
-          <div className="px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wider text-amber-400/90">{t("matches.pinned")}</div>
-          <ul className="space-y-0.5">{pinned.map(row)}</ul>
-        </>
-      )}
-      {rest.length > 0 && (
-        <>
-          {pinned.length > 0 && <div className="px-3 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wider text-zinc-500">{t("matches.leagues")}</div>}
-          <ul className="space-y-0.5">{rest.map(row)}</ul>
-        </>
-      )}
-    </nav>
+    <button
+      onClick={onClick}
+      aria-pressed={active}
+      className={cn("flex shrink-0 items-center gap-2 rounded-full border px-3 py-1.5 text-sm font-semibold transition-colors", focusRing,
+        active ? "border-emerald-500 bg-emerald-600 text-white" : "border-zinc-700 bg-zinc-900/60 text-zinc-300 hover:border-zinc-500 hover:text-zinc-50")}
+    >
+      {children}
+    </button>
   );
 }
+const Count = ({ n }: { n: number }) => <span className="rounded bg-black/25 px-1.5 text-xs tabular-nums opacity-90">{n}</span>;
+
+/* ---------- league header ---------- */
 
 function LeagueHeader({
   id, name, lang, count, live, pinned, onPin, t,
@@ -609,29 +419,6 @@ function LeagueHeader({
         <Star className="h-4 w-4" fill={pinned ? "#fbbf24" : "none"} stroke={pinned ? "#fbbf24" : "currentColor"} aria-hidden />
       </button>
     </div>
-  );
-}
-
-function Chip({
-  active, onClick, count, children, tone, stacked,
-}: { active: boolean; onClick: () => void; count: number; children: React.ReactNode; tone?: "live"; stacked?: boolean }) {
-  return (
-    <button
-      role="tab"
-      aria-selected={active}
-      onClick={onClick}
-      className={cn(
-        "relative flex shrink-0 items-center justify-center gap-1.5 rounded-lg border px-3 text-sm font-semibold transition-colors",
-        stacked ? "min-w-[58px] flex-col gap-0 py-1.5" : "py-2",
-        focusRing,
-        active
-          ? tone === "live" ? "border-red-500 bg-red-600 text-white" : "border-emerald-500 bg-emerald-600 text-white"
-          : "border-zinc-700 bg-zinc-900/60 text-zinc-300 hover:border-zinc-500 hover:text-zinc-50",
-      )}
-    >
-      {children}
-      <span className={cn("rounded px-1 text-[11px] tabular-nums", stacked ? "mt-0.5" : "", active ? "bg-black/25 text-white" : "bg-zinc-800 text-zinc-400")}>{count}</span>
-    </button>
   );
 }
 
@@ -690,17 +477,27 @@ function FixtureRow({
         <TeamLine team={fixture.away} align="right" />
       </div>
 
+      <div className="col-span-2 flex shrink-0 items-center justify-end gap-2 sm:col-span-1">
+      <Link
+        href={`/maker?match=${fixture.id}&kind=${isFinished ? "post" : "pre"}`}
+        className={cn("hidden h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-zinc-700 text-zinc-400 hover:border-emerald-500 hover:text-emerald-400 sm:flex", focusRing)}
+        title={t("maker.fromRow")}
+        aria-label={t("maker.fromRow")}
+      >
+        <Film className="h-4 w-4" aria-hidden />
+      </Link>
       <Button
         variant={isFinished ? "secondary" : "primary"}
         onClick={onStart}
         disabled={disabled}
         loading={starting}
         aria-label={t("matches.startAria", { home: fixture.home.name, away: fixture.away.name })}
-        className="col-span-2 sm:col-span-1"
+        className="whitespace-nowrap"
       >
         {!starting && <Play className="h-3.5 w-3.5" aria-hidden />}
         {starting ? t("matches.starting") : t("matches.startShow")}
       </Button>
+      </div>
     </li>
   );
 }

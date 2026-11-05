@@ -133,6 +133,87 @@ html[lang="am"] body {
   }
 }
 
+
+/* ───────────── Accent palettes ─────────────
+   The studio's primary colour is the `emerald` scale. Choosing an accent re-points that scale, so every
+   button, selected state and highlight follows. `pitch` is the default (Tailwind emerald, nothing to do).
+   The overlay opts in with ?accent=… (class .ov-accent-…). */
+html[data-accent="royal"],
+.ov-accent-royal {
+  --color-emerald-950: #172554;
+  --color-emerald-900: #1e3a8a;
+  --color-emerald-800: #1e40af;
+  --color-emerald-700: #1d4ed8;
+  --color-emerald-600: #2563eb;
+  --color-emerald-500: #3b82f6;
+  --color-emerald-400: #60a5fa;
+  --color-emerald-300: #93c5fd;
+  --color-emerald-200: #bfdbfe;
+  --color-emerald-100: #dbeafe;
+  --color-emerald-50: #eff6ff;
+}
+html[data-theme="light"][data-accent="royal"] {
+  --color-emerald-950: #eff6ff;
+  --color-emerald-900: #dbeafe;
+  --color-emerald-800: #bfdbfe;
+  --color-emerald-700: #93c5fd;
+  --color-emerald-400: #1d4ed8;
+  --color-emerald-300: #1d4ed8;
+  --color-emerald-200: #1e40af;
+  --color-emerald-100: #1e3a8a;
+}
+html[data-accent="gold"],
+.ov-accent-gold {
+  --color-emerald-950: #2b1304;
+  --color-emerald-900: #451a03;
+  --color-emerald-800: #78350f;
+  --color-emerald-700: #92400e;
+  --color-emerald-600: #b45309;
+  --color-emerald-500: #d97706;
+  --color-emerald-400: #fbbf24;
+  --color-emerald-300: #fcd34d;
+  --color-emerald-200: #fde68a;
+  --color-emerald-100: #fef3c7;
+  --color-emerald-50: #fffbeb;
+}
+html[data-theme="light"][data-accent="gold"] {
+  --color-emerald-950: #fffbeb;
+  --color-emerald-900: #fef3c7;
+  --color-emerald-800: #fde68a;
+  --color-emerald-700: #fcd34d;
+  --color-emerald-400: #92400e;
+  --color-emerald-300: #92400e;
+  --color-emerald-200: #78350f;
+  --color-emerald-100: #451a03;
+}
+html[data-accent="crimson"],
+.ov-accent-crimson {
+  --color-emerald-950: #4c0519;
+  --color-emerald-900: #881337;
+  --color-emerald-800: #9f1239;
+  --color-emerald-700: #be123c;
+  --color-emerald-600: #e11d48;
+  --color-emerald-500: #f43f5e;
+  --color-emerald-400: #fb7185;
+  --color-emerald-300: #fda4af;
+  --color-emerald-200: #fecdd3;
+  --color-emerald-100: #ffe4e6;
+  --color-emerald-50: #fff1f2;
+}
+html[data-theme="light"][data-accent="crimson"] {
+  --color-emerald-950: #fff1f2;
+  --color-emerald-900: #ffe4e6;
+  --color-emerald-800: #fecdd3;
+  --color-emerald-700: #fda4af;
+  --color-emerald-400: #be123c;
+  --color-emerald-300: #be123c;
+  --color-emerald-200: #9f1239;
+  --color-emerald-100: #881337;
+}
+.ov-root.ov-tone-light.ov-accent-royal { --color-emerald-400: #1d4ed8; --color-emerald-500: #2563eb; }
+.ov-root.ov-tone-light.ov-accent-gold { --color-emerald-400: #92400e; --color-emerald-500: #b45309; }
+.ov-root.ov-tone-light.ov-accent-crimson { --color-emerald-400: #be123c; --color-emerald-500: #e11d48; }
+
 /* ───────────── Football decoration (control app) ───────────── */
 
 .font-display { font-family: var(--font-display); }
@@ -215,6 +296,17 @@ body.is-resizing iframe, body.is-resizing-y iframe { pointer-events: none; }
   animation: ov-card-in 0.55s cubic-bezier(0.2, 0.8, 0.2, 1) both;
   animation-delay: var(--ov-delay, 0ms);
 }
+
+/* Card entrance styles (chosen with ?anim= or by the preview maker). Default is "slide". */
+@keyframes ov-pop  { 0% { opacity: 0; transform: scale(0.82); } 60% { opacity: 1; transform: scale(1.035); } 100% { opacity: 1; transform: none; } }
+@keyframes ov-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes ov-rise { from { opacity: 0; transform: translateY(90px); } to { opacity: 1; transform: none; } }
+.ov-anim-pop  .ov-card-in { animation-name: ov-pop;  animation-duration: 0.5s; }
+.ov-anim-fade .ov-card-in { animation-name: ov-fade; animation-duration: 0.45s; }
+.ov-anim-rise .ov-card-in { animation-name: ov-rise; animation-duration: 0.55s; }
+/* Exit: used by the maker when a segment ends. */
+@keyframes ov-out { to { opacity: 0; transform: translateY(-24px) scale(0.97); } }
+.ov-leaving .ov-card-in { animation: ov-out 0.35s ease-in both !important; }
 
 /* Shared broadcast shapes */
 .bc-chamfer {

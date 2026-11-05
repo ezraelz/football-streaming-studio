@@ -1,10 +1,14 @@
 "use client";
-import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { memo, useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import type { EditorialCard, MomentumPayload } from "@/lib/api/client";
 import { TeamCrest } from "@/components/overlay/crest";
 import { LeagueBadge } from "@/components/overlay/league-badge";
 import { useOverlayEnv } from "@/components/overlay/env";
 import { BroadcastPanel } from "@/components/overlay/broadcast";
+import { dimsFor } from "@/lib/overlay/stage";
+import { keyOf, applyEditorialUpdate, lowerThirdLift } from "./editorial-state";
+export { applyEditorialUpdate, lowerThirdLift };
+import { zoneOf, isTickerCard, type Zone, type TickerItem, type TickerPayload } from "@/lib/overlay/zones";
 import { useI18n, type MsgKey } from "@/lib/i18n";
 import { localTeamName } from "@/lib/branding/clubs";
 import { accentOn, alpha, competitionLabel, themeFor, themeGradient, type LeagueTheme } from "@/lib/branding/leagues";
@@ -343,73 +347,10 @@ interface AveragePositionsPayload {
 
 /* ── state helper used by the overlay page ─────────────────────────────── */
 
-const keyOf = (c: Partial<EditorialCard>) => c.id ?? c.card_type ?? "card";
-
-export function applyEditorialUpdate(
-  prev: EditorialCard[],
-  msg: Partial<EditorialCard> | null | undefined,
-): EditorialCard[] {
-  if (!msg) return [];
-  if (!msg.id && !msg.card_type) return msg.visible ? prev : [];
-  const key = keyOf(msg);
-  if (msg.visible) {
-    return prev.some((c) => keyOf(c) === key)
-      ? prev.map((c) => (keyOf(c) === key ? ({ ...c, ...msg } as EditorialCard) : c))
-      : [...prev, msg as EditorialCard];
-  }
-  return prev.filter((c) => keyOf(c) !== key);
-}
-
 /* ── screen positions ─────────────────────────────────────────────────── */
 
-export type Zone = "main" | "left" | "right" | "bottom" | "ticker";
-export const ZONES: Zone[] = ["main", "left", "right", "bottom", "ticker"];
-export const ZONE_LABEL: Record<Zone, string> = {
-  main: "Main screen", left: "Left corner", right: "Right corner", bottom: "Bottom strip", ticker: "Ticker bar",
-};
-
-const DEFAULT_ZONE: Record<string, Zone> = {
-  fixture_intro: "main", lineups: "main", match_summary: "main", countdown: "main",
-  standings: "left", form: "left", top_scorers: "right",
-  head_to_head: "bottom", prediction: "main", custom: "bottom",
-};
-
-const isZone = (z: unknown): z is Zone => ZONES.includes(z as Zone);
-
-export interface TickerItem { text: string; tag?: string }
-export interface TickerPayload {
-  kind: "ticker";
-  label?: string;
-  items: Array<string | TickerItem>;
-  source?: "fixtures" | "manual" | "news";
-  competition?: string;
-}
-type CardLike = Pick<EditorialCard, "card_type" | "payload">;
-export const isTickerCard = (card: CardLike) =>
-  card.card_type === "custom" && (card.payload as { kind?: unknown } | null)?.kind === "ticker";
-
-export function zoneOf(card: CardLike): Zone {
-  if (isTickerCard(card)) return "ticker";
-  const z = (card.payload as { zone?: unknown } | null)?.zone;
-  return isZone(z) && z !== "ticker" ? z : (DEFAULT_ZONE[card.card_type] ?? "main");
-}
-
-const W = 1728;
-const H = 972;
-const TOP = 196;
-const GAP = 24;
-const SIDE_W = 440;
-const STRIP_H = 204;
-const TICKER_H = 76;
-const FLOOR = 40;
-
-export function lowerThirdLift(cards: EditorialCard[]): number | undefined {
-  const shown = cards.filter((c) => c.visible);
-  const ticker = shown.some((c) => zoneOf(c) === "ticker");
-  const strip = shown.some((c) => zoneOf(c) === "bottom");
-  if (!ticker && !strip) return undefined;
-  return (ticker ? TICKER_H + GAP : 0) + (strip ? STRIP_H + GAP : 0) + 12;
-}
+export { ZONES, ZONE_LABEL, isTickerCard, zoneOf } from "@/lib/overlay/zones";
+export type { Zone, TickerItem, TickerPayload } from "@/lib/overlay/zones";
 
 const ORDER: Size[] = ["xl", "lg", "md", "sm", "xs"];
 const H_NEED: Record<Size, number> = { xl: 620, lg: 550, md: 475, sm: 345, xs: 0 };
@@ -434,34 +375,44 @@ const toneTheme = (th: LeagueTheme, tone: "dark" | "light"): LeagueTheme =>
 
 /* ── layer ─────────────────────────────────────────────────────────────── */
 
-export function EditorialLayer({
-  cards, home, away, competition, guides = false,
+function EditorialLayerImpl({
+  cards, home, away, competition, guides = false, reserveBottom = 0,
 }: {
   cards: EditorialCard[];
   home?: OverlayTeam;
   away?: OverlayTeam;
   competition?: string;
   guides?: boolean;
+  /** Pixels kept free at the bottom (for captions / the lower third) so they never cover a card. */
+  reserveBottom?: number;
 }) {
-  const { tone } = useOverlayEnv();
+  const { tone, stage } = useOverlayEnv();
   const { t } = useI18n();
+  const { W, H, TOP, GAP, SIDE_W, STRIP_H, TICKER_H, FLOOR } = dimsFor(stage);
   const shown = cards.filter((c) => c.visible);
-  const inZone = (z: Zone, max: number) => shown.filter((c) => zoneOf(c) === z).slice(-max);
+  // Narrow stages (9:16, 1:1) have one column: every card goes to "main".
+  const zoneFor = (c: EditorialCard): Zone => (stage.compactBug && zoneOf(c) !== "ticker" ? "main" : zoneOf(c));
+  // One graphic per zone: a newer card replaces the older one, so nothing is squeezed to half height.
+  const inZone = (z: Zone) => shown.filter((c) => zoneFor(c) === z).slice(-1);
 
   const league = competition ?? shown.map((c) => competitionOf(c)).find(Boolean);
 
-  const main = inZone("main", 4);
-  const left = inZone("left", 2);
-  const right = inZone("right", 2);
-  const bottom = inZone("bottom", 3);
-  const ticker = inZone("ticker", 1)[0];
+  const main = inZone("main");
+  const left = inZone("left");
+  const right = inZone("right");
+  const bottom = inZone("bottom");
+  const ticker = inZone("ticker")[0];
 
   if (!guides && main.length + left.length + right.length + bottom.length === 0 && !ticker) return null;
 
   const tickerReserve = ticker ? TICKER_H + GAP : 0;
   const stripTop = H - tickerReserve - STRIP_H;
-  const mainBottom = bottom.length ? stripTop - GAP : H - (ticker ? tickerReserve : FLOOR);
-  const availH = mainBottom - TOP;
+  const mainBottom = (bottom.length ? stripTop - GAP : H - (ticker ? tickerReserve : FLOOR)) - reserveBottom;
+  // On tall stages a card taller than ~1100px just looks stretched; cap it.
+  const availH = Math.min(mainBottom - TOP, stage.portrait ? 1120 : Infinity);
+  // On a phone, 1080 px is ~6 cm wide: type made for a TV is unreadable. Narrow stages draw cards at a smaller
+  // logical size and scale them up, so the same card simply comes out bigger.
+  const boost = stage.portrait ? 1.35 : stage.compactBug ? 1.15 : 1;
   const leftW = left.length ? SIDE_W : 0;
   const rightW = right.length ? SIDE_W : 0;
   const mainX = leftW ? leftW + GAP : 0;
@@ -478,8 +429,10 @@ export function EditorialLayer({
   const n = main.length;
   const [mc, mr] = n <= 1 ? [1, 1] : n === 2 ? (mainW >= 1000 ? [2, 1] : [1, 2]) : n === 3 ? (mainW >= 1200 ? [3, 1] : [2, 2]) : [2, 2];
   const gridW = n === 1 ? Math.min(mainW, 1240) : mainW;
-  const mainTileW = (gridW - GAP * (mc - 1)) / mc;
-  const mainTileH = (availH - GAP * (mr - 1)) / mr;
+  const gridWL = gridW / boost;
+  const availHL = availH / boost;
+  const mainTileW = (gridWL - GAP * (mc - 1)) / mc;
+  const mainTileH = (availHL - GAP * (mr - 1)) / mr;
   const mainSize = fit("xl", mainTileW, mainTileH, factorFor(main));
 
   const columnSize = (items: EditorialCard[]) =>
@@ -495,7 +448,8 @@ export function EditorialLayer({
         <div
           className="absolute grid"
           style={{
-            left: mainX + (mainW - gridW) / 2, top: TOP, width: gridW, height: availH, gap: GAP,
+            left: mainX + (mainW - gridW) / 2, top: TOP, width: gridWL, height: availHL, gap: GAP,
+            transform: boost === 1 ? undefined : `scale(${boost})`, transformOrigin: "top left",
             gridTemplateColumns: `repeat(${mc}, minmax(0, 1fr))`,
             gridTemplateRows: `repeat(${mr}, minmax(0, 1fr))`,
           }}
@@ -535,6 +489,7 @@ export function EditorialLayer({
 }
 
 function ZoneGuides({ label }: { label: (z: Zone) => string }) {
+  const { W, H, TOP, GAP, SIDE_W, STRIP_H, TICKER_H } = dimsFor(useOverlayEnv().stage);
   const stripTop = H - TICKER_H - GAP - STRIP_H;
   const availH = stripTop - GAP - TOP;
   const box = (label: string, x: number, y: number, w: number, h: number) => (
@@ -566,6 +521,7 @@ const tickerLabel = (label: string | undefined, t: ReturnType<typeof useI18n>["t
 
 function TickerBar({ payload, theme, index }: { payload: TickerPayload; theme: LeagueTheme; index: number }) {
   const { t } = useI18n();
+  const { W, H, TICKER_H } = dimsFor(useOverlayEnv().stage);
   const items: TickerItem[] = (payload.items ?? [])
     .map((i) => (typeof i === "string" ? { text: i } : i))
     .filter((i): i is TickerItem => !!i?.text);
@@ -2840,3 +2796,16 @@ function CustomCard({ theme, title, payload, size, index }: CommonProps & { titl
     </Frame>
   );
 }
+
+type LayerProps = Parameters<typeof EditorialLayerImpl>[0];
+const sameTeam = (a?: LayerProps["home"], b?: LayerProps["home"]) =>
+  a === b || (!!a && !!b && a.name === b.name && a.color === b.color && a.crestUrl === b.crestUrl);
+
+/**
+ * Re-renders only when the cards, league or teams actually change. A score/minute update arrives every few
+ * seconds and used to re-render every card on screen; now it does not touch them.
+ */
+export const EditorialLayer = memo(
+  EditorialLayerImpl,
+  (a, b) => a.cards === b.cards && a.competition === b.competition && sameTeam(a.home, b.home) && sameTeam(a.away, b.away),
+);

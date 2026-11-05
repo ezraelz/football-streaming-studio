@@ -7,7 +7,8 @@ import { useT, tOr, prettify } from "@/lib/i18n";
 /** Events + stats. The score and freshness now live in <MatchStrip /> above the preview. */
 export function LiveDataPanel() {
   const t = useT();
-  const { snapshot, events } = useShowStore();
+  const snapshot = useShowStore((s) => s.snapshot);
+  const events = useShowStore((s) => s.events);
   if (!snapshot) return null;
 
   const recent = events.slice(-6).reverse();

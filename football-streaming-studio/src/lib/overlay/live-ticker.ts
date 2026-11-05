@@ -1,5 +1,5 @@
 import type { LiveMatch } from "@/lib/api/client";
-import type { TickerItem } from "@/components/overlay/scenes/editorial";
+import type { TickerItem } from "@/lib/overlay/zones";
 
 const minuteLabel = (m: LiveMatch): string => {
   if (m.period === "HT" || m.status === "halftime") return "HT";

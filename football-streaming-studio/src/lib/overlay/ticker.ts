@@ -1,5 +1,5 @@
 import type { Fixture } from "@/lib/api/client";
-import type { TickerItem } from "@/components/overlay/scenes/editorial";
+import type { TickerItem } from "@/lib/overlay/zones";
 import { themeFor, DEFAULT_THEME } from "@/lib/branding/leagues";
 
 /**

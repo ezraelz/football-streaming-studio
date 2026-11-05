@@ -11,8 +11,9 @@ import { Button } from "@/components/ui/button";
 import { Field, Segmented, Switch, inputClass } from "@/components/ui/form";
 import { useI18n, useT, type MsgKey } from "@/lib/i18n";
 import { LanguageSwitch, ThemeSwitch } from "@/components/ui/prefs";
+import { FormatSwitch } from "@/components/control/preview-pane";
 import {
-  ethCalendarPref, ethClockPref, overlayLangPref, overlayLitePref, overlayToneOverlayPref,
+  accentPref, ACCENTS, formatPref, ethCalendarPref, ethClockPref, overlayLangPref, overlayLitePref, overlayToneOverlayPref,
 } from "@/lib/prefs";
 
 const SECTIONS: { id: string; label: MsgKey }[] = [
@@ -26,7 +27,10 @@ const SECTIONS: { id: string; label: MsgKey }[] = [
 
 export default function SettingsPage() {
   const t = useT();
-  const { settings, updateSettings, overlayToken, session } = useShowStore();
+  const settings = useShowStore((s) => s.settings);
+  const updateSettings = useShowStore((s) => s.updateSettings);
+  const overlayToken = useShowStore((s) => s.overlayToken);
+  const session = useShowStore((s) => s.session);
 
   return (
     <div className="mx-auto max-w-5xl">
@@ -91,10 +95,34 @@ function AppearanceSection() {
           <Field label={t("prefs.language")}><LanguageSwitch /></Field>
           <Field label={t("prefs.theme")}><ThemeSwitch showLabels /></Field>
         </div>
+        <Field label={t("prefs.accent")}><AccentPicker /></Field>
         <ToggleRow label={t("set.appearance.ethCalendar")} hint={t("set.appearance.ethCalendarHint")} checked={ethCalendar} onChange={ethCalendarPref.set} />
         <ToggleRow label={t("set.appearance.ethClock")} hint={t("set.appearance.ethClockHint")} checked={ethClock} onChange={ethClockPref.set} />
       </div>
     </Section>
+  );
+}
+
+const ACCENT_SWATCH: Record<string, string> = { pitch: "#10b981", royal: "#3b82f6", gold: "#f59e0b", crimson: "#f43f5e" };
+
+function AccentPicker() {
+  const t = useT();
+  const accent = accentPref.useValue();
+  return (
+    <div role="radiogroup" aria-label={t("prefs.accent")} className="flex flex-wrap gap-2">
+      {ACCENTS.map((a) => (
+        <button
+          key={a}
+          role="radio"
+          aria-checked={accent === a}
+          onClick={() => accentPref.set(a)}
+          className={`flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors ${accent === a ? "border-emerald-500 bg-emerald-600/15 text-zinc-50" : "border-zinc-700 text-zinc-300 hover:border-zinc-500"}`}
+        >
+          <span className="h-4 w-4 rounded-full ring-2 ring-white/30" style={{ background: ACCENT_SWATCH[a] }} aria-hidden />
+          {t(`accent.${a}` as const)}
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -190,7 +218,7 @@ function CopyField({
 function OverlaySection({ token, sessionId }: { token: string | null; sessionId: string }) {
   const t = useT();
   const { lang: studioLang } = useI18n();
-  const { session } = useShowStore();
+  const session = useShowStore((s) => s.session);
   const overlayLang = overlayLangPref.useValue();
   const tone = overlayToneOverlayPref.useValue();
   const lite = overlayLitePref.useValue();
@@ -202,7 +230,9 @@ function OverlaySection({ token, sessionId }: { token: string | null; sessionId:
   // scene changes made in the studio. (`?scene=<key>` still works to pin a source to one scene.)
   // lang / tone / lite are baked into the URL because OBS has its own browser storage.
   const lang = overlayLang === "follow" ? studioLang : overlayLang;
-  const look = `lang=${lang}&tone=${tone}${lite ? "&lite=1" : ""}`;
+  const accent = accentPref.useValue();
+  const format = formatPref.useValue();
+  const look = `lang=${lang}&tone=${tone}&accent=${accent}&format=${format}${lite ? "&lite=1" : ""}`;
   const overlayUrl = token
     ? `${base}/overlay/${sessionId}?token=${token}&${look}`
     : `${base}/overlay/${sessionId}?${look}`;
@@ -248,6 +278,9 @@ function OverlaySection({ token, sessionId }: { token: string | null; sessionId:
                 { value: "light", label: t("set.overlay.tone.light") },
               ]}
             />
+          </Field>
+          <Field label={t("format.label")}>
+            <FormatSwitch value={format} onChange={formatPref.set} />
           </Field>
           <div className="sm:col-span-2">
             <ToggleRow label={t("set.overlay.lite")} hint={t("set.overlay.liteHint")} checked={lite} onChange={overlayLitePref.set} />

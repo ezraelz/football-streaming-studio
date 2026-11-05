@@ -9,7 +9,7 @@ import { TeamCrest } from "@/components/overlay/crest";
 /** Compact scoreboard that stays above the preview so the operator never loses the match. */
 export function MatchStrip() {
   const t = useT();
-  const { snapshot } = useShowStore();
+  const snapshot = useShowStore((s) => s.snapshot);
   if (!snapshot) return null;
 
   return (

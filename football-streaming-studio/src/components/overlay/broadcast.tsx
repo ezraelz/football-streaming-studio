@@ -43,7 +43,7 @@ export function BroadcastPanel({
       } as CSSProperties}
     >
       <div
-        className="bc-chamfer relative flex min-h-0 flex-1 flex-col overflow-hidden backdrop-blur-md"
+        className="bc-chamfer relative flex min-h-0 flex-1 flex-col overflow-hidden"
         style={{ ["--cut" as string]: `${cut}px`, background: "var(--ov-surface)" } as CSSProperties}
       >
         <div className="bc-stripes pointer-events-none absolute inset-0" />
